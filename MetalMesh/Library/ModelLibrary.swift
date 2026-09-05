@@ -29,6 +29,7 @@ final class ModelLibrary {
 
     private var indexURL: URL { rootDirectory.appendingPathComponent("library.json") }
     private var modelsDirectory: URL { rootDirectory.appendingPathComponent("Models", isDirectory: true) }
+    var thumbnailsDirectory: URL { rootDirectory.appendingPathComponent("Thumbnails", isDirectory: true) }
     private var samplesDirectory: URL? { bundle.url(forResource: "Samples", withExtension: nil) }
 
     /// 파일 임포터에 넘길 타입 목록
@@ -181,6 +182,7 @@ final class ModelLibrary {
         if let url = fileURL(for: entry) {
             try? fileManager.removeItem(at: url.deletingLastPathComponent())
         }
+        try? fileManager.removeItem(at: thumbnailsDirectory.appendingPathComponent("\(entry.id.uuidString).png"))
         entries.removeAll { $0.id == entry.id }
         save()
     }

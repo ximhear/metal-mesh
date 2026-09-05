@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ModelListView: View {
     @Environment(ModelLibrary.self) private var library
+    @Environment(ThumbnailStore.self) private var thumbnails
     @State private var showImporter = false
     @State private var pendingImports = 0
     @State private var errorMessage: String?
@@ -80,6 +81,7 @@ struct ModelListView: View {
     private func deleteButton(for entry: ModelEntry) -> some View {
         if !entry.isBundled {
             Button(role: .destructive) {
+                thumbnails.invalidate(entry)
                 library.delete(entry)
             } label: {
                 Label("삭제", systemImage: "trash")

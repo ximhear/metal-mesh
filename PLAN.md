@@ -157,7 +157,8 @@ xcodebuild -project MetalMesh.xcodeproj -scheme MetalMesh -destination 'platform
   MeshletBuilder가 재질별로 묶고 `Meshlet.materialIndex` 기록, GPUMesh가 sRGB 밉맵 텍스처 + `Material` 인자 버퍼(리소스 ID) 생성,
   fragment가 `useResources`된 텍스처를 직접 샘플링. 테스트 6개 추가(총 37개)
 - [x] 오프스크린 렌더 → PNG (`Renderer.snapshot`, README 스크린샷 생성에 사용)
-- [ ] 썸네일: snapshot을 리스트 행에 표시
+- [x] 썸네일 (2026-09-06): `ThumbnailStore`가 행 표시 시 요청을 큐에 넣고 한 번에 하나씩 로드→메시렛→snapshot(320×240) → Documents/Thumbnails/<id>.png.
+  삭제 시 무효화. 첫 실행 25개 생성 약 10초(M2 Pro). 테스트 2개 추가(총 39개)
 - [ ] 큰 모델 로딩 진행률, 에러 처리(손상 파일, 미지원 포맷)
 - [ ] (선택) glTF 로더, (선택) meshoptimizer 포팅으로 메시렛 품질 개선, (선택) 다중 LOD
 

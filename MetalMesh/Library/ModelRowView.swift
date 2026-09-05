@@ -1,14 +1,15 @@
 import SwiftUI
 
 struct ModelRowView: View {
+    @Environment(ThumbnailStore.self) private var thumbnails
     let entry: ModelEntry
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "cube")
-                .font(.title2)
-                .foregroundStyle(.secondary)
-                .frame(width: 32)
+            thumbnail
+                .frame(width: 80, height: 60)
+                .background(Color(red: 0.11, green: 0.11, blue: 0.13), in: RoundedRectangle(cornerRadius: 6))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
             VStack(alignment: .leading, spacing: 3) {
                 Text(entry.name)
                     .font(.headline)
@@ -37,5 +38,19 @@ struct ModelRowView: View {
                 .foregroundStyle(.tertiary)
         }
         .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
+    private var thumbnail: some View {
+        if let image = thumbnails.image(for: entry) {
+            Image(decorative: image, scale: 1)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+        } else if thumbnails.failed.contains(entry.id) {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
+        } else {
+            ProgressView().controlSize(.small)
+        }
     }
 }

@@ -18,7 +18,8 @@ mesh 스테이지가 살아남은 메시렛만 삼각형으로 펼칩니다.
 
 ## 기능
 
-- **모델 라이브러리** 화면: 번들 샘플 25개 자동 등록, 파일 임포터·드래그&드롭으로 추가, 재시작 후에도 유지
+- **모델 라이브러리** 화면: 번들 샘플 25개 자동 등록, 파일 임포터·드래그&드롭으로 추가, 재시작 후에도 유지,
+  항목별 썸네일(오프스크린 렌더, Documents/Thumbnails에 PNG 캐시)
 - **뷰어** 화면: 오빗 카메라(회전/줌/팬), 표시 모드(셰이딩·메시렛 색·노멀), 컬링·와이어프레임·텍스처 토글, 라이선스 정보 시트
 - **baseColor 텍스처**: OBJ(.mtl), USDC(외부 파일), USDZ(내장) 재질에서 추출. 서브메시별 재질을 메시렛 단위로 유지하고
   Metal 3 인자 버퍼(`MTLResourceID`)로 프래그먼트에서 직접 샘플링
@@ -66,7 +67,7 @@ open MetalMesh.xcodeproj
 명령줄:
 
 ```bash
-# macOS 빌드 + 테스트 (37개)
+# macOS 빌드 + 테스트 (39개)
 xcodebuild -project MetalMesh.xcodeproj -scheme MetalMesh -destination 'platform=macOS' \
   -derivedDataPath build/DerivedData test
 
@@ -92,12 +93,12 @@ TEST_RUNNER_METALMESH_SNAPSHOTS=1 xcodebuild ... -only-testing:MetalMeshTests/Sn
 project.yml                     XcodeGen 정의 (iOS/macOS 단일 타깃 + 테스트 타깃)
 MetalMesh/
   App/                          진입점, 기기 지원 검사, 미지원 안내
-  Library/                      ModelEntry, ModelLibrary(JSON 인덱스 + Documents/Models), 리스트 화면
+  Library/                      ModelEntry, ModelLibrary(JSON 인덱스 + Documents/Models), ThumbnailStore, 리스트 화면
   Import/                       ModelIOQueue(직렬화), ModelProbe, ModelLoader, MeshletBuilder
   Rendering/                    Renderer, GPUMesh(버퍼·텍스처·재질), RenderSettings, Math, Snapshot, Shaders/
   Viewer/                       ModelViewerView, MetalView(제스처), OrbitCamera
   Resources/Samples/            번들 샘플 모델 + 폴더별 LICENSE.txt + MODELS.md
-Tests/                          Swift Testing 37개 (레이아웃, 라이브러리, 로더·재질, 메시렛, 오프스크린 렌더)
+Tests/                          Swift Testing 39개 (레이아웃, 라이브러리, 썸네일, 로더·재질, 메시렛, 오프스크린 렌더)
 scripts/probe-model.swift       Model I/O 로드 검증 CLI
 .claude/skills/fetch-3d-model/  무료 소스(Poly Haven, Sketchfab, Poly Pizza, GitHub 테스트 메시)에서 모델을 받는 절차
 PLAN.md                         단계별 계획과 진행 상태
@@ -115,7 +116,7 @@ PLAN.md                         단계별 계획과 진행 상태
 ## 로드맵
 
 - [x] baseColor 텍스처 표시
-- [ ] 리스트 썸네일(오프스크린 렌더 재사용)
+- [x] 리스트 썸네일(오프스크린 렌더 재사용)
 - [ ] 삼각형 전용 최소 GLB 로더
 - [ ] 메시렛 클러스터링 품질 개선(meshoptimizer 방식), LOD
 - [ ] iPhone/iPad 실기기 성능 측정
