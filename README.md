@@ -13,6 +13,7 @@ mesh 스테이지가 살아남은 메시렛만 삼각형으로 펼칩니다.
 | ![Lion statue](docs/images/lion-shaded.png) 사자 석상, 49만 삼각형 (CC0, noe-3d.at) | ![XYZ RGB Dragon meshlets](docs/images/dragon-meshlets.png) XYZ RGB Dragon, 25만 삼각형 → 11,900 메시렛 |
 | ![Armor normals](docs/images/armor-normals.png) 노멀 디버그 뷰 (Cleveland Museum of Art, CC0) | ![Teapot wireframe](docs/images/teapot-wireframe.png) 와이어프레임 |
 | ![Camera textured](docs/images/camera-textured.png) baseColor 텍스처 (Poly Haven Camera 01, CC0) | ![Egyptian cat textured](docs/images/cat-textured.png) USDZ 내장 텍스처 (Egyptian Cat Statue by Ankledot, CC BY) |
+| ![Duck glb](docs/images/duck-glb.png) GLB (Khronos Duck) | ![Avocado glb](docs/images/avocado-glb.png) GLB 내장 텍스처 (Khronos Avocado, CC0) |
 
 이미지는 앱의 렌더러로 오프스크린 렌더링한 결과입니다 (`Tests/SnapshotTests.swift`).
 
@@ -24,12 +25,14 @@ mesh 스테이지가 살아남은 메시렛만 삼각형으로 펼칩니다.
 - **baseColor 텍스처**: OBJ(.mtl), USDC(외부 파일), USDZ(내장) 재질에서 추출. 서브메시별 재질을 메시렛 단위로 유지하고
   Metal 3 인자 버퍼(`MTLResourceID`)로 프래그먼트에서 직접 샘플링
 - 하단 통계: 보이는 메시렛 / 전체 메시렛, 삼각형 수, GPU 프레임 시간
-- 지원 포맷: **OBJ, PLY, STL, USD / USDA / USDC / USDZ** (Model I/O)
+- 지원 포맷: **OBJ, PLY, STL, USD / USDA / USDC / USDZ** (Model I/O), **GLB / glTF** (자체 최소 로더: 노드 변환, 인덱스 유무,
+  TRIANGLES/STRIP/FAN, 정규화 정수 접근자, 내장·외부·data: URI 텍스처. Draco·스키닝·애니메이션은 미지원)
 
 ## 렌더링 파이프라인
 
 ```
 파일 ──▶ ModelLoader (Model I/O)      삼각형화, 노드 변환 적용, 노멀 생성, Vertex{pos,normal,uv} 48B로 정규화
+         GLBLoader (glb/gltf)          같은 MeshData를 만드는 자체 glTF 2.0 파서
                                       서브메시 재질에서 baseColor 텍스처/색 추출, 삼각형별 재질 인덱스
      ──▶ MeshletBuilder (CPU)         재질별로 나눈 뒤 Morton 코드로 공간 정렬 → 정점 ≤64 / 삼각형 ≤126 단위로 묶기
                                       메시렛마다 경계 구 + 노멀 콘(meshoptimizer 규약) + 재질 인덱스
@@ -67,7 +70,7 @@ open MetalMesh.xcodeproj
 명령줄:
 
 ```bash
-# macOS 빌드 + 테스트 (39개)
+# macOS 빌드 + 테스트 (46개)
 xcodebuild -project MetalMesh.xcodeproj -scheme MetalMesh -destination 'platform=macOS' \
   -derivedDataPath build/DerivedData test
 
@@ -94,11 +97,11 @@ project.yml                     XcodeGen 정의 (iOS/macOS 단일 타깃 + 테�
 MetalMesh/
   App/                          진입점, 기기 지원 검사, 미지원 안내
   Library/                      ModelEntry, ModelLibrary(JSON 인덱스 + Documents/Models), ThumbnailStore, 리스트 화면
-  Import/                       ModelIOQueue(직렬화), ModelProbe, ModelLoader, MeshletBuilder
+  Import/                       ModelIOQueue(직렬화), ModelProbe, ModelLoader, GLBLoader, MeshletBuilder
   Rendering/                    Renderer, GPUMesh(버퍼·텍스처·재질), RenderSettings, Math, Snapshot, Shaders/
   Viewer/                       ModelViewerView, MetalView(제스처), OrbitCamera
   Resources/Samples/            번들 샘플 모델 + 폴더별 LICENSE.txt + MODELS.md
-Tests/                          Swift Testing 39개 (레이아웃, 라이브러리, 썸네일, 로더·재질, 메시렛, 오프스크린 렌더)
+Tests/                          Swift Testing 46개 (레이아웃, 라이브러리, 썸네일, 로더·재질, glTF, 메시렛, 오프스크린 렌더)
 scripts/probe-model.swift       Model I/O 로드 검증 CLI
 .claude/skills/fetch-3d-model/  무료 소스(Poly Haven, Sketchfab, Poly Pizza, GitHub 테스트 메시)에서 모델을 받는 절차
 PLAN.md                         단계별 계획과 진행 상태
@@ -111,19 +114,20 @@ PLAN.md                         단계별 계획과 진행 상태
 - 래스터라이저 컬링은 끄고(`cullMode = .none`) 뒷면 제거는 object 스테이지의 노멀 콘이 담당합니다. 와인딩이 뒤집힌 파일도 보이게 하기 위함입니다.
 - 재질은 baseColor만 씁니다(노멀·러프니스 맵 무시). USD 재질에는 baseColor 의미 속성이 여러 개일 수 있어(상수 `baseColor` + 텍스처 `diffuseColor`) 텍스처가 있는 쪽을 우선합니다. USDZ 내장 텍스처는 `MDLAsset.loadTextures()` 뒤에만 읽힙니다.
 - Model I/O UV는 좌하단 원점이라 셰이더에서 v를 뒤집어 샘플링합니다.
-- GLB는 Model I/O가 읽지 못해 미지원입니다.
+- glTF UV는 좌상단 원점이라 로더에서 v를 뒤집어 내부 규약(좌하단)에 맞춘 뒤 셰이더가 다시 뒤집습니다.
+- MTKTextureLoader는 팔레트(인덱스 컬러) PNG를 디코딩하지 못해(Khronos Duck) 업로드 전에 RGBA8로 다시 그립니다.
 
 ## 로드맵
 
 - [x] baseColor 텍스처 표시
 - [x] 리스트 썸네일(오프스크린 렌더 재사용)
-- [ ] 삼각형 전용 최소 GLB 로더
+- [x] 삼각형 전용 최소 GLB 로더
 - [ ] 메시렛 클러스터링 품질 개선(meshoptimizer 방식), LOD
 - [ ] iPhone/iPad 실기기 성능 측정
 
 ## 샘플 모델 라이선스
 
-번들 모델 25개의 출처와 라이선스는 [`MetalMesh/Resources/Samples/MODELS.md`](MetalMesh/Resources/Samples/MODELS.md)와 각 폴더의 `LICENSE.txt`에 있습니다.
+번들 모델 28개의 출처와 라이선스는 [`MetalMesh/Resources/Samples/MODELS.md`](MetalMesh/Resources/Samples/MODELS.md)와 각 폴더의 `LICENSE.txt`에 있습니다.
 Stanford 스캔 모델은 비상업·출처 표기 조건, Sketchfab의 CC BY 모델(Laocoön by rigsters, Egyptian Cat by Ankledot, Skull by martinjario)은 작성자 표기 조건입니다.
 Poly Haven 모델과 Sketchfab CC0 모델은 CC0입니다.
 

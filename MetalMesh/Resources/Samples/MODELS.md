@@ -27,3 +27,6 @@
 | Armor for Man and Horse | https://sketchfab.com/3d-models/faca2ad557f64809b598c3a646a8804f (Cleveland Museum of Art) | CC0 | usdz | 119,758 |
 | Egyptian Cat Statue | https://sketchfab.com/3d-models/02b0456362f9442da46d39fb34b3ee5b (Ankledot) | CC BY 4.0 — 작성자 표기 의무 | usdz | 4,622 |
 | Skull | https://sketchfab.com/3d-models/1a9db900738d44298b0bc59f68123393 (martinjario) | CC BY 4.0 — 작성자 표기 의무 | usdz | 31,016 |
+| Duck | Khronos glTF-Sample-Assets (Sony, 2006) | SCEA Shared Source License 1.0 | glb (팔레트 PNG 텍스처) | 4,212 |
+| Avocado | Khronos glTF-Sample-Assets (Microsoft) | CC0 1.0 | glb (내장 PBR 텍스처) | 682 |
+| Bunny (low poly) | https://poly.pizza/m/irZjWFARyl (Quaternius) | CC0 1.0 | glb | 8,284 |

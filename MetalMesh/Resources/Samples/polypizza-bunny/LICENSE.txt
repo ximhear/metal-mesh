@@ -1,0 +1,5 @@
+Bunny (low poly)
+Author: Quaternius (Poly Pizza)
+Source: https://poly.pizza/m/irZjWFARyl
+License: CC0 1.0
+Format: glb

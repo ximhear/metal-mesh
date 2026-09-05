@@ -9,7 +9,7 @@ enum ModelProbe {
         var triangleCount: Int
     }
 
-    static let supportedExtensions: Set<String> = ["obj", "ply", "stl", "usd", "usda", "usdc", "usdz"]
+    static var supportedExtensions: Set<String> { ModelLoader.supportedExtensions }
 
     static func isSupported(_ url: URL) -> Bool {
         supportedExtensions.contains(url.pathExtension.lowercased())
@@ -17,7 +17,13 @@ enum ModelProbe {
 
     /// 백그라운드에서 실행된다. 열 수 없으면 nil.
     static func stats(for url: URL) async -> Stats? {
-        await ModelIOQueue.shared.run {
+        if GLBLoader.canLoad(url) {
+            return await Task.detached(priority: .utility) {
+                guard let mesh = try? GLBLoader.load(url: url) else { return nil }
+                return Stats(vertexCount: mesh.vertices.count, triangleCount: mesh.triangleCount)
+            }.value
+        }
+        return await ModelIOQueue.shared.run {
             guard MDLAsset.canImportFileExtension(url.pathExtension) else { return nil }
             let asset = MDLAsset(url: url)
             var vertices = 0

@@ -1,0 +1,4 @@
+Duck (glTF Sample Assets)
+Source: https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/Duck
+License: SCEA Shared Source License, Version 1.0 (Sony Computer Entertainment America) — 재배포 시 라이선스 고지 유지
+Format: glb

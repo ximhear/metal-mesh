@@ -1,0 +1,4 @@
+Avocado (glTF Sample Assets)
+Source: https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/Avocado
+License: CC0 1.0 Universal (Microsoft)
+Format: glb (내장 PBR 텍스처)

@@ -1,3 +1,4 @@
+import CoreGraphics
 import Metal
 import MetalKit
 
@@ -59,7 +60,7 @@ struct GPUMesh {
             var m = Material()
             m.baseColorFactor = material.baseColorFactor
             var texture = placeholder
-            if let image = material.baseColorImage,
+            if let image = material.baseColorImage.map(Self.normalizedRGBA),
                let loaded = try? loader.newTexture(cgImage: image, options: [
                    .SRGB: true,
                    .generateMipmaps: true,
@@ -78,6 +79,20 @@ struct GPUMesh {
         self.textures = textures
         materialCount = gpuMaterials.count
         textureCount = textures.count - 1
+    }
+
+    /// MTKTextureLoader는 인덱스 컬러(팔레트) PNG나 그레이스케일 등 일부 CGImage를 디코딩하지 못한다("Image decoding failed").
+    /// 32bpp RGB가 아니면 sRGB RGBA8로 다시 그려서 넘긴다.
+    static func normalizedRGBA(_ image: CGImage) -> CGImage {
+        let isRGB = image.colorSpace?.model == .rgb
+        if image.bitsPerPixel == 32 && image.bitsPerComponent == 8 && isRGB { return image }
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8,
+                                      bytesPerRow: image.width * 4, space: colorSpace,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)
+        else { return image }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        return context.makeImage() ?? image
     }
 
     private static func makePlaceholderTexture(device: MTLDevice) throws -> MTLTexture {

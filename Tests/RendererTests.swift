@@ -168,6 +168,19 @@ struct RendererTests {
         #expect(abs(plain.r - plain.g) < 12, "텍스처 끄면 무채색 \(plain)")
     }
 
+    @Test func indexedColorPNGTextureUploads() async throws {
+        // Khronos Duck의 텍스처는 8비트 팔레트 PNG → 정규화 없이는 MTKTextureLoader가 실패한다
+        let device = try #require(self.device)
+        let samples = try #require(Bundle.main.url(forResource: "Samples", withExtension: nil))
+        let mesh = try await ModelLoader.load(url: samples.appendingPathComponent("Duck/Duck.glb"))
+        let image = try #require(mesh.materials.compactMap(\.baseColorImage).first)
+        #expect(image.bitsPerPixel == 8, "테스트 전제: 팔레트 PNG")
+        let normalized = GPUMesh.normalizedRGBA(image)
+        #expect(normalized.bitsPerPixel == 32 && normalized.width == image.width)
+        let renderer = try Renderer(device: device, mesh: MeshletBuilder.build(mesh), materials: mesh.materials)
+        #expect(renderer.stats.textureCount == 1)
+    }
+
     @Test func frustumPlanesContainCameraTarget() {
         let camera = OrbitCamera()
         camera.frame(center: SIMD3(1, 2, 3), radius: 2)

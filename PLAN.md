@@ -15,7 +15,7 @@
 | 프로젝트 생성 | **XcodeGen** (`project.yml` → `.xcodeproj`) | 로컬에 설치됨. pbxproj를 손으로 관리하지 않고 CLI에서 재생성 가능 |
 | UI | SwiftUI + `NavigationStack`, MTKView는 `ViewRepresentable`로 래핑 | |
 | 1차 지원 포맷 | **OBJ, PLY, STL, USD/USDA/USDC/USDZ** (Model I/O `MDLAsset`) | 별도 파서 없이 정점/인덱스 추출 가능. `fetch-3d-model` 스킬의 포맷 목록과 동일 |
-| 2차 포맷 | **GLB** (Phase 2b, 자체 최소 파서) | Poly Pizza·Khronos 샘플이 전부 GLB. 삼각형 메시만 지원(스키닝/애니메이션 제외), 텍스처는 baseColor만 |
+| 2차 포맷 | **GLB / glTF** (자체 최소 파서, 완료) | Poly Pizza·Khronos 샘플이 전부 GLB. 삼각형 메시만 지원(스키닝/애니메이션/Draco 제외), 텍스처는 baseColor만 |
 | 메시렛 한계 | 정점 ≤ 64, 삼각형 ≤ 126 (Metal 최대치는 256 / 512) | 캐시 효율과 스레드그룹 크기 균형. 상수로 조절 가능하게 |
 | 개발 검증 기기 | 이 맥(M2 Pro) | 시뮬레이터는 메시 셰이더 미지원 → macOS 타깃으로 먼저 개발 |
 
@@ -126,12 +126,14 @@ xcodebuild -project MetalMesh.xcodeproj -scheme MetalMesh -destination 'platform
 - [x] Morton 코드 공간 정렬 후 분할 (bunny 컬링률 8% → 36%, 메시렛 시각화가 패치 형태로 개선)
 - 남은 일(선택): meshoptimizer식 클러스터링으로 품질 추가 개선, 텍스처 로드는 Phase 5
 
-### Phase 2b — GLB 최소 로더 (Phase 3 이후로 미룰 수 있음)
-- [ ] GLB 컨테이너(JSON 청크 + BIN 청크) 파싱, `meshes[].primitives` 중 TRIANGLES만 처리
-- [ ] accessor → position/normal/uv/indices 추출, 노드 변환 행렬 적용해 단일 메시로 병합
-- [ ] baseColorTexture(PNG/JPEG 내장) 1장만 로드, 나머지 재질 무시
-- [ ] 단위 테스트: Khronos `Duck.glb`, Poly Pizza 모델 1개 로드
-- **완료 기준**: Poly Pizza에서 받은 .glb가 변환 없이 리스트에 추가되고 렌더링
+### Phase 2b — GLB 최소 로더 ✅ (2026-09-06 완료)
+- [x] `GLBLoader`: GLB 컨테이너 + .gltf(외부/data: URI), 노드 TRS/matrix, TRIANGLES/STRIP/FAN, 인덱스 유무, 정규화 정수 접근자
+- [x] 노멀 없으면 생성, glTF UV(좌상단) → 내부 규약(좌하단) 변환
+- [x] pbrMetallicRoughness baseColorFactor/baseColorTexture(bufferView·URI 이미지), 재질 캐시
+- [x] Draco/sparse는 명시적 거부. `ModelLoader.load`가 확장자로 분기(Model I/O 큐 불필요)
+- [x] 팔레트 PNG 텍스처(Duck) 업로드 실패 → `GPUMesh.normalizedRGBA`로 해결
+- [x] 테스트 7개 (합성 .gltf, 스트립, 잘못된 magic, Duck/Avocado/Poly Pizza bunny, 프로브)
+- **완료 기준 충족**: Poly Pizza bunny.glb가 변환 없이 등록·렌더링. 샘플 28개(총 ~113MB)
 
 ### Phase 3 — 메시 셰이더 렌더러 (핵심) ✅ (2026-09-05 완료)
 - [x] `ShaderTypes.h`에 Uniforms/MeshletPayload/버퍼 인덱스 추가, `MeshShaders.metal` object→mesh→fragment

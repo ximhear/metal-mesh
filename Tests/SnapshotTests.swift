@@ -27,6 +27,9 @@ struct SnapshotTests {
         Shot(file: "Camera_01/Camera_01_1k.usdc", name: "camera-textured", mode: .shaded, yaw: 0.7, pitch: 0.3),
         Shot(file: "egyptian-cat/egyptian-cat.usdz", name: "cat-textured", mode: .shaded, yaw: 0.5, pitch: 0.25),
         Shot(file: "Ukulele_01/Ukulele_01_1k.usdc", name: "ukulele-textured", mode: .shaded, yaw: 0.3, pitch: 0.9),
+        Shot(file: "Duck/Duck.glb", name: "duck-glb", mode: .shaded, yaw: 0.9, pitch: 0.3),
+        Shot(file: "Avocado/Avocado.glb", name: "avocado-glb", mode: .shaded, yaw: 0.6, pitch: 0.3),
+        Shot(file: "polypizza-bunny/polypizza-bunny.glb", name: "polypizza-bunny-glb", mode: .shaded, yaw: 0.7, pitch: 0.3),
     ]
 
     @Test func snapshotProducesImage() throws {
@@ -64,7 +67,7 @@ struct SnapshotTests {
             let png = try #require(Renderer.pngData(image))
             let url = outDir.appendingPathComponent("\(shot.name).png")
             try png.write(to: url)
-            print("SNAPSHOT \(url.path) visible=\(renderer.stats.visibleMeshletCount)/\(renderer.stats.meshletCount)")
+            print("SNAPSHOT \(url.path) visible=\(renderer.stats.visibleMeshletCount)/\(renderer.stats.meshletCount) tris=\(mesh.triangleCount) verts=\(mesh.vertices.count) textures=\(renderer.stats.textureCount)")
         }
     }
 }

@@ -5,9 +5,8 @@ description: 무료(CC0/CC-BY/공개 연구용) 사이트에서 3D 모델 파일
 
 # fetch-3d-model
 
-이 앱(Model I/O 기반 로더)이 바로 읽을 수 있는 포맷: **OBJ, PLY, STL, USD/USDA/USDC/USDZ**.
-GLB는 앱의 자체 GLB 로더(PLAN.md Phase 2b)가 들어간 뒤 지원. 그 전에는 변환(아래 5절) 없이 받지 않는다.
-현재 로더 지원 상태는 `Import/ModelLoader.swift`의 확장자 목록으로 확인한다.
+이 앱이 바로 읽을 수 있는 포맷: **OBJ, PLY, STL, USD/USDA/USDC/USDZ** (Model I/O), **GLB / glTF** (자체 로더, 삼각형 메시·baseColor만.
+Draco 압축·스키닝·애니메이션 미지원). 현재 목록은 `Import/ModelLoader.swift`의 `supportedExtensions`로 확인한다.
 
 저장 위치: `MetalMesh/Resources/Samples/<모델이름>/` (파일 + `LICENSE.txt`) — 저장소 루트 기준
 기록 위치: `MetalMesh/Resources/Samples/MODELS.md` (이름, 출처 URL, 라이선스, 포맷, 정점 수 한 줄씩 append)
@@ -23,7 +22,7 @@ GLB는 앱의 자체 GLB 로더(PLAN.md Phase 2b)가 들어간 뒤 지원. 그 �
 | 5 | Poly Pizza `https://api.poly.pizza/v1.1` | **glb** | CC0 / CC-BY 3.0 (모델별) | 로우폴리 게임 스타일 모델. 키 필요 — `.env.local`의 `POLY_PIZZA_API_KEY` |
 | 6 | KhronosGroup/glTF-Sample-Assets (GitHub) | glb/gltf | 모델별(대부분 CC) | 렌더러 호환성 테스트 |
 
-GLB 전용 소스(5, 6)는 앱에 GLB 로더가 들어가기 전까지는 5절 변환이 필요하다. 변환 수단이 없으면 받지 말고 사용자에게 알린다.
+GLB 소스(5, 6)는 그대로 받아 쓴다. 단 Draco 압축(`KHR_draco_mesh_compression`) 파일은 로더가 거부하므로 프로브로 확인한다.
 Smithsonian은 브라우저 세션이 필요하므로 이 스킬에서는 쓰지 않는다.
 사용자가 특정 사이트를 지정하면 그 지시가 우선한다.
 
@@ -124,11 +123,12 @@ mkdir -p MetalMesh/Resources/Samples/<이름> && curl -sL -o MetalMesh/Resources
 
 - 라이선스는 결과의 `Licence` 필드를 그대로 기록. **CC-BY 3.0이면 `LICENSE.txt`에 Creator.Username을 반드시 표기**.
 - 응답이 401이면 키 만료/오타 → 사용자에게 알림. 재시도 반복 금지.
-- 받은 GLB는 5절로 변환하거나, 앱에 GLB 로더가 있으면 그대로 등록.
+- 받은 GLB는 그대로 등록. 프로브(`scripts/probe-model.swift`는 Model I/O 전용이므로 GLB는 앱 테스트 `GLBLoaderTests`나 임포트로 확인).
 
-## 5. glTF/GLB → USD 변환 (선택)
+## 5. glTF/GLB → USD 변환 (이제 선택 사항)
 
-이 세션에 Blender MCP(`mcp__blender__*`)가 연결돼 있으면 `execute_blender_code`로
+앱이 GLB를 직접 읽으므로 보통 변환이 필요 없다. Draco 압축 GLB처럼 로더가 거부하는 파일만,
+이 세션에 Blender MCP(`mcp__blender__*`)가 연결돼 있을 때 `execute_blender_code`로
 `bpy.ops.import_scene.gltf(filepath=...)` → `bpy.ops.wm.usd_export(filepath=..., export_textures=True)` 순서로 변환한다.
 Blender가 없으면 변환하지 않고 사용자에게 알린다. 변환 코드를 추측으로 짜지 말 것.
 
