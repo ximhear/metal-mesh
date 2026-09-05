@@ -42,32 +42,51 @@ struct ModelViewerView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
+            #if os(macOS)
+            // 넓은 툴바: 세그먼트 피커 + 토글을 나열
             ToolbarItemGroup(placement: .primaryAction) {
                 Picker("표시", selection: $settings.debugMode) {
                     ForEach(DebugMode.allCases) { Text($0.label).tag($0) }
                 }
                 .pickerStyle(.segmented)
-                Toggle(isOn: $settings.cullingEnabled) {
-                    Label("컬링", systemImage: "scissors")
-                }
-                Toggle(isOn: $settings.wireframe) {
-                    Label("와이어프레임", systemImage: "grid")
-                }
-                Toggle(isOn: $settings.texturesEnabled) {
-                    Label("텍스처", systemImage: "photo")
-                }
-                .disabled(stats.textureCount == 0)
-                Button {
-                    showInfo = true
+                Toggle(isOn: $settings.cullingEnabled) { Label("컬링", systemImage: "scissors") }
+                Toggle(isOn: $settings.wireframe) { Label("와이어프레임", systemImage: "grid") }
+                Toggle(isOn: $settings.texturesEnabled) { Label("텍스처", systemImage: "photo") }
+                    .disabled(stats.textureCount == 0)
+                infoButton
+            }
+            #else
+            // 좁은 화면: 표시 옵션을 메뉴 하나로 묶는다 (버튼이 겹치지 않도록)
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Picker("표시", selection: $settings.debugMode) {
+                        ForEach(DebugMode.allCases) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.inline)
+                    Divider()
+                    Toggle(isOn: $settings.cullingEnabled) { Label("메시렛 컬링", systemImage: "scissors") }
+                    Toggle(isOn: $settings.wireframe) { Label("와이어프레임", systemImage: "grid") }
+                    Toggle(isOn: $settings.texturesEnabled) { Label("텍스처", systemImage: "photo") }
+                        .disabled(stats.textureCount == 0)
                 } label: {
-                    Label("정보", systemImage: "info.circle")
+                    Label("표시 옵션", systemImage: "slider.horizontal.3")
                 }
             }
+            ToolbarItem(placement: .topBarTrailing) { infoButton }
+            #endif
         }
         .sheet(isPresented: $showInfo) {
             ModelInfoView(entry: entry, fileURL: library.fileURL(for: entry), stats: stats)
         }
         .task(id: entry.id) { await load() }
+    }
+
+    private var infoButton: some View {
+        Button {
+            showInfo = true
+        } label: {
+            Label("정보", systemImage: "info.circle")
+        }
     }
 
     private var statsBar: some View {
