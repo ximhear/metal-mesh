@@ -46,6 +46,9 @@ targets:
         INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES
         INFOPLIST_KEY_UIFileSharingEnabled: YES
         TARGETED_DEVICE_FAMILY: "1,2"
+        # Swift/Metal 공유 헤더
+        SWIFT_OBJC_BRIDGING_HEADER: MetalMesh/MetalMesh-Bridging-Header.h
+        MTL_HEADER_SEARCH_PATHS: "$(SRCROOT)/MetalMesh/Rendering/Shaders"
         # Metal
         MTL_ENABLE_DEBUG_INFO: INCLUDE_SOURCE
         MTL_LANGUAGE_REVISION: Metal30
@@ -74,6 +77,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gzonelee.metalmesh.tests
         GENERATE_INFOPLIST_FILE: YES
+        # 브리징 헤더의 C 타입(Vertex, Meshlet)은 @testable import로 전달되지 않아 테스트도 같은 헤더를 쓴다
+        SWIFT_OBJC_BRIDGING_HEADER: MetalMesh/MetalMesh-Bridging-Header.h
         # 멀티플랫폼 타깃: macOS 번들은 실행 파일이 Contents/MacOS 아래에 있다
         "TEST_HOST[sdk=macosx*]": "$(BUILT_PRODUCTS_DIR)/MetalMesh.app/Contents/MacOS/MetalMesh"
         "TEST_HOST[sdk=iphoneos*]": "$(BUILT_PRODUCTS_DIR)/MetalMesh.app/MetalMesh"

@@ -28,6 +28,7 @@ metal-mesh/                          # 저장소 루트
 ├── .claude/skills/fetch-3d-model/   # 모델 수집 스킬
 ├── Tests/                           # 단위 테스트 (Swift Testing)
 └── MetalMesh/                       # 앱 소스 루트
+├── MetalMesh-Bridging-Header.h      # ShaderTypes.h를 Swift에 노출 (앱·테스트 타깃 공용)
 ├── App/
 │   ├── MetalMeshApp.swift           # @main
 │   ├── RootView.swift               # 지원 여부에 따라 NavigationStack / 안내 화면 분기
@@ -48,14 +49,14 @@ metal-mesh/                          # 저장소 루트
 │   ├── MeshPipeline.swift           # MTLMeshRenderPipelineDescriptor 생성
 │   ├── GPUMesh.swift                # 메시렛 버퍼 세트 (MTLBuffer 묶음)
 │   └── Shaders/
-│       ├── ShaderTypes.h            # Swift/MSL 공유 구조체 (Uniforms, Meshlet, Payload)
+│       ├── ShaderTypes.h            # Swift/MSL 공유 구조체 (Vertex, Meshlet 완료 / Uniforms는 Phase 3)
 │       ├── MeshShaders.metal        # object / mesh / fragment
 │       └── Fallback.metal           # (선택) 미지원 기기용 일반 vertex 파이프라인
-├── Import/
-│   ├── ModelProbe.swift             # 정점/삼각형 수만 세는 경량 로더 (직렬 액터, 완료)
-│   ├── ModelLoader.swift            # MDLAsset → 중간 표현(positions, normals, uvs, indices)
-│   ├── MeshletBuilder.swift         # 삼각형 → 메시렛 분할 + 경계 구(sphere)/노멀 콘 계산
-│   └── ModelImportError.swift
+├── Import/                          # (완료)
+│   ├── ModelIOQueue.swift           # Model I/O 직렬화 액터 (libusd 동시 로드 크래시 회피)
+│   ├── ModelProbe.swift             # 정점/삼각형 수만 세는 경량 로더
+│   ├── ModelLoader.swift            # MDLAsset → MeshData(Vertex[], UInt32[], bounds)
+│   └── MeshletBuilder.swift         # MeshData → MeshletMesh(meshlets, meshletVertices, meshletTriangles)
 └── Resources/
     └── Samples/                     # 번들 샘플 모델(폴더 참조) + MODELS.md
 ```
@@ -116,11 +117,14 @@ xcodebuild -project MetalMesh.xcodeproj -scheme MetalMesh -destination 'platform
 - 메모: **libusd_ms는 USD 파일을 여러 스레드에서 동시에 처음 열면 크래시**(Sdf_GetExtension 널 역참조).
   Model I/O 호출은 반드시 `ModelProbe.serialQueue`처럼 직렬화할 것. Phase 2 로더도 같은 규칙 적용.
 
-### Phase 2 — 로딩 + 메시렛 빌더 (CPU)
-- [ ] `ModelLoader`: MDLAsset → 서브메시 병합, 정점 포맷 정규화(position/normal/uv), 노멀 없으면 생성
-- [ ] `MeshletBuilder`: 인덱스 순서 기반 그리디 분할(1차) → 경계 구 + 노멀 콘 계산
-- [ ] 단위 테스트: 모든 삼각형 보존, 한계 초과 없음, 인덱스 범위
-- **완료 기준**: bunny.obj 로드 후 메시렛 수/정점 수가 콘솔과 리스트 행에 표시
+### Phase 2 — 로딩 + 메시렛 빌더 (CPU) ✅ (2026-09-05 완료)
+- [x] `ShaderTypes.h`: Vertex(48B) / Meshlet(64B) 레이아웃 + 한계 상수. 브리징 헤더로 Swift·테스트·MSL 공유
+- [x] `ModelIOQueue`: 모든 Model I/O 호출을 직렬화하는 액터 (프로브·로더 공용)
+- [x] `ModelLoader`: preserveTopology=false로 삼각형화, 노드 변환 적용, 노멀 없으면 생성, Vertex 레이아웃으로 정규화
+- [x] `MeshletBuilder`: 인덱스 순서 그리디 분할, AABB 중심 경계 구, meshoptimizer 규약 노멀 콘(cutoff 1 = 컬링 불가)
+- [x] 테스트 16개: 레이아웃 고정, 삼각형 보존·순서, 한계·인덱스 범위, 경계 구 포함, 평면 콘, 샘플 3종 로드, 동시 로드 안전
+- **완료 기준 충족**: bunny 69,451 삼각형 로드 0.39s, 메시렛 빌드 약 0.2s (Debug, M2 Pro)
+- 남은 일(선택): 정점 캐시 최적화/메시렛 품질 개선(meshoptimizer 포팅), 텍스처 로드는 Phase 5
 
 ### Phase 2b — GLB 최소 로더 (Phase 3 이후로 미룰 수 있음)
 - [ ] GLB 컨테이너(JSON 청크 + BIN 청크) 파싱, `meshes[].primitives` 중 TRIANGLES만 처리
