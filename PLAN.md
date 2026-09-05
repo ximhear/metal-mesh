@@ -33,10 +33,10 @@ metal-mesh/                          # 저장소 루트
 │   ├── RootView.swift               # 지원 여부에 따라 NavigationStack / 안내 화면 분기
 │   ├── DeviceCapability.swift       # 메시 셰이더 지원 여부 검사 (metal3 + apple7|mac2)
 │   └── UnsupportedDeviceView.swift
-├── Library/                         # 1번 화면: 모델 리스트
-│   ├── ModelEntry.swift             # id, 이름, 파일 URL, 추가일, 통계(정점/메시렛 수), 썸네일 경로
-│   ├── ModelLibrary.swift           # @Observable 저장소, JSON 인덱스 + Documents/Models/ 로 파일 복사
-│   ├── ModelListView.swift          # List + 추가 버튼(.fileImporter) + 드래그&드롭(macOS) + 삭제
+├── Library/                         # 1번 화면: 모델 리스트 (완료)
+│   ├── ModelEntry.swift             # id, 이름, source(bundled|imported 상대경로), 통계, licenseText
+│   ├── ModelLibrary.swift           # @Observable 저장소, Documents/library.json + Documents/Models/<uuid>/
+│   ├── ModelListView.swift          # List + fileImporter + dropDestination + 삭제
 │   └── ModelRowView.swift
 ├── Viewer/                          # 2번 화면: 렌더링
 │   ├── ModelViewerView.swift        # 화면 컨테이너, 로딩 상태, 통계 오버레이, 디버그 토글
@@ -52,6 +52,7 @@ metal-mesh/                          # 저장소 루트
 │       ├── MeshShaders.metal        # object / mesh / fragment
 │       └── Fallback.metal           # (선택) 미지원 기기용 일반 vertex 파이프라인
 ├── Import/
+│   ├── ModelProbe.swift             # 정점/삼각형 수만 세는 경량 로더 (직렬 액터, 완료)
 │   ├── ModelLoader.swift            # MDLAsset → 중간 표현(positions, normals, uvs, indices)
 │   ├── MeshletBuilder.swift         # 삼각형 → 메시렛 분할 + 경계 구(sphere)/노멀 콘 계산
 │   └── ModelImportError.swift
@@ -105,11 +106,15 @@ xcodebuild -project MetalMesh.xcodeproj -scheme MetalMesh -destination 'platform
   -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO test
 ```
 
-### Phase 1 — 모델 리스트 화면
-- [ ] `ModelEntry`, `ModelLibrary` (JSON 인덱스, 파일 복사, 삭제)
-- [ ] `ModelListView`: `.fileImporter`(obj/usdz), macOS 드래그&드롭, 번들 샘플 자동 등록
-- [ ] 행 탭 → `ModelViewerView(entry:)` 로 push
-- **완료 기준**: 파일 추가 → 앱 재시작 후에도 리스트 유지 → 탭하면 빈 뷰어로 이동
+### Phase 1 — 모델 리스트 화면 ✅ (2026-09-05 완료)
+- [x] `ModelEntry`, `ModelLibrary` (Documents/library.json + Documents/Models/<uuid>/, 삭제는 임포트 항목만)
+- [x] `ModelListView`: `.fileImporter`(다중 선택), `dropDestination`(macOS/iOS 공통), 번들 샘플 자동 등록, 삭제(스와이프/컨텍스트 메뉴)
+- [x] `ModelProbe`: Model I/O로 정점/삼각형 수 계산 (직렬 액터)
+- [x] 행 탭 → `ModelViewerView(entry:)` 자리 화면 (파일 정보 + LICENSE 표시)
+- [x] 테스트 4개: 샘플 중복 등록 없음, 임포트 영속·삭제, 미지원 확장자 거부, 샘플 삭제 불가
+- **완료 기준 충족**: macOS 실행 시 샘플 6개가 통계와 함께 표시(library.json 확인)
+- 메모: **libusd_ms는 USD 파일을 여러 스레드에서 동시에 처음 열면 크래시**(Sdf_GetExtension 널 역참조).
+  Model I/O 호출은 반드시 `ModelProbe.serialQueue`처럼 직렬화할 것. Phase 2 로더도 같은 규칙 적용.
 
 ### Phase 2 — 로딩 + 메시렛 빌더 (CPU)
 - [ ] `ModelLoader`: MDLAsset → 서브메시 병합, 정점 포맷 정규화(position/normal/uv), 노멀 없으면 생성
@@ -168,6 +173,7 @@ xcodebuild -project MetalMesh.xcodeproj -scheme MetalMesh -destination 'platform
 | 시뮬레이터에서 메시 셰이더 불가 | macOS 타깃으로 개발·검증, iOS는 실기기에서 확인 |
 | Model I/O가 glTF 미지원 | Phase 2b에서 삼각형 전용 최소 GLB 파서 작성. 스키닝·애니메이션·Draco 압축은 범위 밖으로 명시 |
 | API 키 노출 | `.env.local`만 사용, `.gitignore` 등록 완료. 스킬은 파일에서 읽고 값을 출력하지 않음 |
+| libusd 동시 로드 크래시 | Model I/O 호출을 단일 액터로 직렬화 (ModelProbe 참고) |
 | 대형 모델의 메시렛 빌드 시간 | 백그라운드 Task + 진행률, 결과를 캐시 파일로 저장(선택) |
 | 메시렛 크기와 `threadsPerMeshThreadgroup` 불일치 | 상수를 `ShaderTypes.h` 한 곳에 두고 Swift/MSL이 공유 |
 | pbxproj 충돌 | XcodeGen 단일 소스. `.xcodeproj`는 gitignore, `project.yml`만 커밋 |

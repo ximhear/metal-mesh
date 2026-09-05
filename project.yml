@@ -25,7 +25,7 @@ targets:
     sources:
       - path: MetalMesh
         excludes:
-          - "Resources/Samples/**/*.md"
+          - "Resources/Samples/**"   # 아래 폴더 참조로만 포함
       - path: MetalMesh/Resources/Samples
         type: folder
         buildPhase: resources
