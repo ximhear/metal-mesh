@@ -1,6 +1,7 @@
 import Testing
 import simd
 @testable import MetalMesh
+@testable import MeshCore
 
 struct MeshletBuilderTests {
     /// n×n 격자 평면 (z=0, 노멀 +z). 삼각형 2·n·n개.
@@ -162,6 +163,60 @@ struct MeshletBuilderTests {
             }
         }
         #expect(Set(result.meshlets.map(\.materialIndex)) == [0, 1, 2])
+    }
+
+    @Test func clusterStrategyPreservesTrianglesAndLimits() {
+        var mesh = makeGrid(40)
+        var tris = stride(from: 0, to: mesh.indices.count, by: 3).map { Array(mesh.indices[$0..<$0 + 3]) }
+        var rng = SystemRandomNumberGenerator()
+        tris.shuffle(using: &rng)
+        mesh.indices = tris.flatMap { $0 }
+        let result = MeshletBuilder.build(mesh, maxVertices: 32, maxTriangles: 40, strategy: .cluster)
+        #expect(result.triangleCount == mesh.triangleCount)
+        #expect(Set(triangleSet(result)) == Set(tris))
+        var expectedOffset: UInt32 = 0
+        for meshlet in result.meshlets {
+            #expect(meshlet.vertexCount <= 32 && meshlet.triangleCount <= 40 && meshlet.triangleCount > 0)
+            #expect(meshlet.vertexOffset == expectedOffset)
+            expectedOffset += UInt32(meshlet.vertexCount)
+            for i in Int(meshlet.triangleOffset)..<(Int(meshlet.triangleOffset) + Int(meshlet.triangleCount) * 3) {
+                #expect(Int(result.meshletTriangles[i]) < Int(meshlet.vertexCount))
+            }
+        }
+    }
+
+    @Test func clusterStrategyBeatsSpatialScan() {
+        var mesh = makeGrid(60)   // 7,200 삼각형
+        var tris = stride(from: 0, to: mesh.indices.count, by: 3).map { Array(mesh.indices[$0..<$0 + 3]) }
+        var rng = SystemRandomNumberGenerator()
+        tris.shuffle(using: &rng)
+        mesh.indices = tris.flatMap { $0 }
+        let scan = MeshletBuilder.build(mesh, strategy: .spatialScan)
+        let cluster = MeshletBuilder.build(mesh, strategy: .cluster)
+        func meanRadius(_ m: MeshletMesh) -> Float { m.meshlets.map(\.boundsRadius).reduce(0, +) / Float(m.meshlets.count) }
+        func meanTriangles(_ m: MeshletMesh) -> Float { Float(m.triangleCount) / Float(m.meshlets.count) }
+        // 클러스터는 컴팩트함(작은 경계 구)이 목표. 메시렛 수는 스캔보다 조금 많을 수 있다.
+        #expect(cluster.meshlets.count <= Int(Double(scan.meshlets.count) * 1.2))
+        #expect(meanTriangles(cluster) >= meanTriangles(scan) * 0.8)
+        #expect(meanRadius(cluster) <= meanRadius(scan))
+    }
+
+    @Test func clusterKeepsMaterialsSeparate() {
+        var mesh = makeGrid(20)
+        mesh.materials = [.default, MaterialData(name: "red", baseColorFactor: [1, 0, 0, 1]), MaterialData(name: "blue", baseColorFactor: [0, 0, 1, 1])]
+        mesh.triangleMaterials = (0..<mesh.triangleCount).map { UInt32($0 % 3) }
+        let result = MeshletBuilder.build(mesh, strategy: .cluster)
+        #expect(result.triangleCount == mesh.triangleCount)
+        let byTriangle = Dictionary(uniqueKeysWithValues: stride(from: 0, to: mesh.indices.count, by: 3).map {
+            (Array(mesh.indices[$0..<$0 + 3]), mesh.triangleMaterials[$0 / 3])
+        })
+        for meshlet in result.meshlets {
+            for t in 0..<Int(meshlet.triangleCount) {
+                let base = Int(meshlet.triangleOffset) + t * 3
+                let tri = (0..<3).map { k in result.meshletVertices[Int(meshlet.vertexOffset) + Int(result.meshletTriangles[base + k])] }
+                #expect(byTriangle[tri] == meshlet.materialIndex)
+            }
+        }
     }
 
     @Test func emptyMeshProducesNoMeshlets() {

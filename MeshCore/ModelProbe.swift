@@ -3,20 +3,21 @@ import ModelIO
 
 /// Model I/O로 파일을 열어 정점·삼각형 수만 센다. 리스트 표시용이며 렌더링 로더(Phase 2)와는 별개.
 /// 모든 Model I/O 호출은 `ModelIOQueue`로 직렬화한다 (동시 로드 크래시 회피).
-enum ModelProbe {
-    struct Stats: Sendable, Equatable {
-        var vertexCount: Int
-        var triangleCount: Int
+public enum ModelProbe {
+    public struct Stats: Sendable, Equatable {
+        public var vertexCount: Int
+        public var triangleCount: Int
+        public init(vertexCount: Int, triangleCount: Int) { self.vertexCount = vertexCount; self.triangleCount = triangleCount }
     }
 
-    static var supportedExtensions: Set<String> { ModelLoader.supportedExtensions }
+    public static var supportedExtensions: Set<String> { ModelLoader.supportedExtensions }
 
-    static func isSupported(_ url: URL) -> Bool {
+    public static func isSupported(_ url: URL) -> Bool {
         supportedExtensions.contains(url.pathExtension.lowercased())
     }
 
     /// 백그라운드에서 실행된다. 열 수 없으면 nil.
-    static func stats(for url: URL) async -> Stats? {
+    public static func stats(for url: URL) async -> Stats? {
         if GLBLoader.canLoad(url) {
             return await Task.detached(priority: .utility) {
                 guard let mesh = try? GLBLoader.load(url: url) else { return nil }

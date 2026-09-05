@@ -124,7 +124,11 @@ xcodebuild -project MetalMesh.xcodeproj -scheme MetalMesh -destination 'platform
 - [x] 테스트 16개: 레이아웃 고정, 삼각형 보존·순서, 한계·인덱스 범위, 경계 구 포함, 평면 콘, 샘플 3종 로드, 동시 로드 안전
 - **완료 기준 충족**: bunny 69,451 삼각형 로드 0.39s, 메시렛 빌드 약 0.2s (Debug, M2 Pro)
 - [x] Morton 코드 공간 정렬 후 분할 (bunny 컬링률 8% → 36%, 메시렛 시각화가 패치 형태로 개선)
-- 남은 일(선택): meshoptimizer식 클러스터링으로 품질 추가 개선, 텍스처 로드는 Phase 5
+- [x] meshoptimizer식 클러스터링 (2026-09-06): 인접 삼각형을 (extra 정점 수, 거리·콘 점수)로 선택, 프런티어 후보 유지,
+  섬 경계에서는 가까운 미사용 삼각형을 이어 담기. 컬링률 bunny 21→33%, dragon 4.6→15.4%, 사자 11.6→23.2%
+- [x] 정점 용접 + 스무스 노멀 (`MeshPostProcess`): Model I/O addNormals가 정점을 쪼개던 문제 해결 (bunny 메시렛 3,308 → 874)
+- [x] **MeshCore 프레임워크 분리**: 메시 처리 코드를 Debug에서도 -O로 빌드 (bunny 클러스터링 2.1s → 40ms). 멀티플랫폼 타깃은
+  rpath를 SDK별로 지정해야 함(`LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]`), 아니면 macOS 테스트가 산출물 폴더의 프레임워크를 로드해 서명 오류
 
 ### Phase 2b — GLB 최소 로더 ✅ (2026-09-06 완료)
 - [x] `GLBLoader`: GLB 컨테이너 + .gltf(외부/data: URI), 노드 TRS/matrix, TRIANGLES/STRIP/FAN, 인덱스 유무, 정규화 정수 접근자
@@ -162,7 +166,8 @@ xcodebuild -project MetalMesh.xcodeproj -scheme MetalMesh -destination 'platform
 - [x] 썸네일 (2026-09-06): `ThumbnailStore`가 행 표시 시 요청을 큐에 넣고 한 번에 하나씩 로드→메시렛→snapshot(320×240) → Documents/Thumbnails/<id>.png.
   삭제 시 무효화. 첫 실행 25개 생성 약 10초(M2 Pro). 테스트 2개 추가(총 39개)
 - [ ] 큰 모델 로딩 진행률, 에러 처리(손상 파일, 미지원 포맷)
-- [ ] (선택) glTF 로더, (선택) meshoptimizer 포팅으로 메시렛 품질 개선, (선택) 다중 LOD
+- [x] glTF 로더, meshoptimizer식 클러스터링 (완료)
+- [ ] (선택) 다중 LOD
 
 ## 6. 프로젝트 스킬: `fetch-3d-model`
 

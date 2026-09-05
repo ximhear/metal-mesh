@@ -1,8 +1,8 @@
 import simd
 
-enum Math {
+public enum Math {
     /// 오른손 좌표계, Metal 깊이 범위 [0, 1] 원근 투영
-    static func perspective(fovY: Float, aspect: Float, near: Float, far: Float) -> float4x4 {
+    public static func perspective(fovY: Float, aspect: Float, near: Float, far: Float) -> float4x4 {
         let y = 1 / tan(fovY * 0.5)
         let x = y / aspect
         let z = far / (near - far)
@@ -14,7 +14,7 @@ enum Math {
         )
     }
 
-    static func lookAt(eye: SIMD3<Float>, target: SIMD3<Float>, up: SIMD3<Float>) -> float4x4 {
+    public static func lookAt(eye: SIMD3<Float>, target: SIMD3<Float>, up: SIMD3<Float>) -> float4x4 {
         let f = simd_normalize(target - eye)          // 앞 (-z)
         let s = simd_normalize(simd_cross(f, up))     // 오른쪽
         let u = simd_cross(s, f)                      // 위
@@ -26,7 +26,7 @@ enum Math {
         )
     }
 
-    static func upperLeft3x3(_ m: float4x4) -> float3x3 {
+    public static func upperLeft3x3(_ m: float4x4) -> float3x3 {
         float3x3(
             SIMD3(m.columns.0.x, m.columns.0.y, m.columns.0.z),
             SIMD3(m.columns.1.x, m.columns.1.y, m.columns.1.z),
@@ -36,7 +36,7 @@ enum Math {
 
     /// Gribb–Hartmann: 클립 행렬에서 프러스텀 평면 6개 추출 (안쪽 양수, 정규화).
     /// Metal 클립 z ∈ [0, w] 기준. 순서: left, right, bottom, top, near, far
-    static func frustumPlanes(from m: float4x4) -> [SIMD4<Float>] {
+    public static func frustumPlanes(from m: float4x4) -> [SIMD4<Float>] {
         func row(_ i: Int) -> SIMD4<Float> {
             SIMD4(m.columns.0[i], m.columns.1[i], m.columns.2[i], m.columns.3[i])
         }

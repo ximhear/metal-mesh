@@ -5,31 +5,35 @@ import ModelIO
 import simd
 
 /// 재질의 CPU 표현. baseColor만 다룬다.
-struct MaterialData: @unchecked Sendable, Equatable {
-    var name: String
-    var baseColorFactor: SIMD4<Float> = [1, 1, 1, 1]
+public struct MaterialData: @unchecked Sendable, Equatable {
+    public var name: String
+    public var baseColorFactor: SIMD4<Float> = [1, 1, 1, 1]
     /// sRGB baseColor 이미지. nil이면 색 계수만 쓴다.
-    var baseColorImage: CGImage?
+    public var baseColorImage: CGImage?
 
-    static let `default` = MaterialData(name: "default")
+    public init(name: String, baseColorFactor: SIMD4<Float> = [1, 1, 1, 1], baseColorImage: CGImage? = nil) {
+        self.name = name; self.baseColorFactor = baseColorFactor; self.baseColorImage = baseColorImage
+    }
 
-    static func == (a: MaterialData, b: MaterialData) -> Bool {
+    public static let `default` = MaterialData(name: "default")
+
+    public static func == (a: MaterialData, b: MaterialData) -> Bool {
         a.name == b.name && a.baseColorFactor == b.baseColorFactor && a.baseColorImage === b.baseColorImage
     }
 }
 
 /// 렌더링용 중간 표현. 모든 서브메시를 하나의 삼각형 리스트로 병합한 결과.
-struct MeshData: @unchecked Sendable {
-    var vertices: [Vertex]
-    var indices: [UInt32]
-    var boundsMin: SIMD3<Float>
-    var boundsMax: SIMD3<Float>
+public struct MeshData: @unchecked Sendable {
+    public var vertices: [Vertex]
+    public var indices: [UInt32]
+    public var boundsMin: SIMD3<Float>
+    public var boundsMax: SIMD3<Float>
     /// 최소 1개. 인덱스 0은 기본 재질.
-    var materials: [MaterialData]
+    public var materials: [MaterialData]
     /// 삼각형별 재질 인덱스. 비어 있으면 모두 0.
-    var triangleMaterials: [UInt32]
+    public var triangleMaterials: [UInt32]
 
-    init(vertices: [Vertex], indices: [UInt32], boundsMin: SIMD3<Float>, boundsMax: SIMD3<Float>,
+    public init(vertices: [Vertex], indices: [UInt32], boundsMin: SIMD3<Float>, boundsMax: SIMD3<Float>,
          materials: [MaterialData] = [.default], triangleMaterials: [UInt32] = []) {
         self.vertices = vertices
         self.indices = indices
@@ -39,21 +43,21 @@ struct MeshData: @unchecked Sendable {
         self.triangleMaterials = triangleMaterials
     }
 
-    var triangleCount: Int { indices.count / 3 }
+    public var triangleCount: Int { indices.count / 3 }
 
-    func materialIndex(ofTriangle t: Int) -> UInt32 {
+    public func materialIndex(ofTriangle t: Int) -> UInt32 {
         t < triangleMaterials.count ? triangleMaterials[t] : 0
     }
-    var boundsCenter: SIMD3<Float> { (boundsMin + boundsMax) * 0.5 }
-    var boundsRadius: Float { simd_length(boundsMax - boundsMin) * 0.5 }
+    public var boundsCenter: SIMD3<Float> { (boundsMin + boundsMax) * 0.5 }
+    public var boundsRadius: Float { simd_length(boundsMax - boundsMin) * 0.5 }
 }
 
-enum ModelLoaderError: LocalizedError {
+public enum ModelLoaderError: LocalizedError {
     case unsupportedExtension(String)
     case openFailed(String)
     case noTriangles
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .unsupportedExtension(let ext): return "지원하지 않는 형식입니다: .\(ext)"
         case .openFailed(let reason): return "파일을 열 수 없습니다: \(reason)"
@@ -64,11 +68,11 @@ enum ModelLoaderError: LocalizedError {
 
 /// Model I/O로 파일을 읽어 `Vertex` 레이아웃(position/normal/uv, stride 48)으로 정규화한다.
 /// 노드 변환을 정점에 적용하고, 노멀이 없으면 생성한다. 폴리곤은 삼각형으로 분할된다.
-enum ModelLoader {
+public enum ModelLoader {
     /// Model I/O가 읽는 포맷 + 자체 glTF 로더 포맷
-    static let supportedExtensions: Set<String> = Set(["obj", "ply", "stl", "usd", "usda", "usdc", "usdz"]).union(GLBLoader.supportedExtensions)
+    public static let supportedExtensions: Set<String> = Set(["obj", "ply", "stl", "usd", "usda", "usdc", "usdz"]).union(GLBLoader.supportedExtensions)
 
-    static func load(url: URL) async throws -> MeshData {
+    public static func load(url: URL) async throws -> MeshData {
         if GLBLoader.canLoad(url) {
             // Model I/O를 쓰지 않으므로 직렬 큐가 필요 없다
             return try await Task.detached(priority: .userInitiated) { try GLBLoader.load(url: url) }.value
@@ -77,7 +81,7 @@ enum ModelLoader {
     }
 
     /// 테스트나 직렬 컨텍스트에서 직접 호출할 때 사용. 일반 코드는 `load(url:)`.
-    static func loadSynchronously(url: URL) throws -> MeshData {
+    public static func loadSynchronously(url: URL) throws -> MeshData {
         if GLBLoader.canLoad(url) { return try GLBLoader.load(url: url) }
         guard MDLAsset.canImportFileExtension(url.pathExtension) else {
             throw ModelLoaderError.unsupportedExtension(url.pathExtension)
@@ -96,13 +100,19 @@ enum ModelLoader {
                               boundsMin: SIMD3(repeating: .greatestFiniteMagnitude),
                               boundsMax: SIMD3(repeating: -.greatestFiniteMagnitude))
         var materialCache = MaterialCache(assetDirectory: url.deletingLastPathComponent())
+        var needsNormals = false
 
         for index in 0..<asset.count {
-            visit(asset.object(at: index), parentTransform: matrix_identity_float4x4, into: &merged, materials: &materialCache)
+            visit(asset.object(at: index), parentTransform: matrix_identity_float4x4, into: &merged,
+                  materials: &materialCache, needsNormals: &needsNormals)
         }
         guard !merged.indices.isEmpty else { throw ModelLoaderError.noTriangles }
         merged.materials = materialCache.materials
         if merged.triangleMaterials.allSatisfy({ $0 == 0 }) { merged.triangleMaterials = [] }
+
+        // Model I/O는 서브메시/면 단위로 정점을 복제하는 일이 많다. 같은 정점을 합쳐 메시렛 정점 재사용률을 높인다.
+        MeshPostProcess.weld(&merged, includeNormals: !needsNormals)
+        if needsNormals { MeshPostProcess.computeSmoothNormals(&merged) }
         return merged
     }
 
@@ -199,23 +209,24 @@ enum ModelLoader {
         return d
     }()
 
-    private static func visit(_ object: MDLObject, parentTransform: float4x4, into merged: inout MeshData, materials: inout MaterialCache) {
+    private static func visit(_ object: MDLObject, parentTransform: float4x4, into merged: inout MeshData,
+                              materials: inout MaterialCache, needsNormals: inout Bool) {
         let local = object.transform?.matrix ?? matrix_identity_float4x4
         let world = parentTransform * local
         if let mesh = object as? MDLMesh {
-            append(mesh, transform: world, into: &merged, materials: &materials)
+            append(mesh, transform: world, into: &merged, materials: &materials, needsNormals: &needsNormals)
         }
         for child in object.children.objects {
-            visit(child, parentTransform: world, into: &merged, materials: &materials)
+            visit(child, parentTransform: world, into: &merged, materials: &materials, needsNormals: &needsNormals)
         }
     }
 
-    private static func append(_ mesh: MDLMesh, transform: float4x4, into merged: inout MeshData, materials: inout MaterialCache) {
+    private static func append(_ mesh: MDLMesh, transform: float4x4, into merged: inout MeshData,
+                               materials: inout MaterialCache, needsNormals: inout Bool) {
         let hasNormals = (mesh.vertexDescriptor.attributes as? [MDLVertexAttribute])?
             .contains { $0.name == MDLVertexAttributeNormal && $0.format != .invalid } ?? false
-        if !hasNormals {
-            mesh.addNormals(withAttributeNamed: MDLVertexAttributeNormal, creaseThreshold: 0.5)
-        }
+        // 노멀이 없으면 Model I/O의 addNormals 대신(면마다 정점을 쪼갠다) 용접 후 직접 계산한다
+        if !hasNormals { needsNormals = true }
         mesh.vertexDescriptor = targetDescriptor
 
         guard let buffer = mesh.vertexBuffers.first else { return }

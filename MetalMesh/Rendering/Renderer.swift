@@ -1,3 +1,4 @@
+import MeshCore
 import Foundation
 import Metal
 import MetalKit

@@ -2,6 +2,7 @@ import Testing
 import Foundation
 import simd
 @testable import MetalMesh
+@testable import MeshCore
 
 struct ModelLoaderTests {
     private func sampleURL(_ relative: String) throws -> URL {

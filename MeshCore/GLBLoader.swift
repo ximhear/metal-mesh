@@ -3,12 +3,12 @@ import Foundation
 import ImageIO
 import simd
 
-enum GLBLoaderError: LocalizedError {
+public enum GLBLoaderError: LocalizedError {
     case invalidContainer(String)
     case unsupported(String)
     case missing(String)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .invalidContainer(let why): return "glTF 파일이 손상되었습니다: \(why)"
         case .unsupported(let what): return "지원하지 않는 glTF 기능입니다: \(what)"
@@ -20,14 +20,14 @@ enum GLBLoaderError: LocalizedError {
 /// 삼각형 메시 전용 최소 glTF 2.0 로더 (.glb 컨테이너, .gltf + 외부/data: URI).
 /// 지원: 노드 변환, POSITION/NORMAL/TEXCOORD_0, 인덱스 유무, TRIANGLES/STRIP/FAN, pbrMetallicRoughness의 baseColor.
 /// 미지원: Draco/meshopt 압축, sparse accessor, 스키닝, 애니메이션, 모프 타깃, KHR_texture_transform.
-enum GLBLoader {
-    static let supportedExtensions: Set<String> = ["glb", "gltf"]
+public enum GLBLoader {
+    public static let supportedExtensions: Set<String> = ["glb", "gltf"]
 
-    static func canLoad(_ url: URL) -> Bool {
+    public static func canLoad(_ url: URL) -> Bool {
         supportedExtensions.contains(url.pathExtension.lowercased())
     }
 
-    static func load(url: URL) throws -> MeshData {
+    public static func load(url: URL) throws -> MeshData {
         let fileData = try Data(contentsOf: url)
         let (jsonData, binChunk) = try splitContainer(fileData, isBinary: url.pathExtension.lowercased() == "glb")
         let gltf = try JSONDecoder().decode(GLTF.self, from: jsonData)

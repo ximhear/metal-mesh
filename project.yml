@@ -19,6 +19,29 @@ settings:
     DEVELOPMENT_TEAM: WD3LPJ2STX
 
 targets:
+  # 메시 처리 라이브러리. 로더·메시렛 빌더·수학은 핫 루프가 많아 Debug에서도 -O로 빌드한다
+  # (-Onone은 50배 느림: bunny 클러스터링 2.1s vs 38ms). 앱 본체는 -Onone으로 디버깅 가능.
+  MeshCore:
+    type: framework
+    supportedDestinations: [iOS, macOS]
+    sources:
+      - path: MeshCore
+        excludes:
+          - "include/**"
+      - path: MeshCore/include/MeshCore.h
+        headerVisibility: public
+      - path: MeshCore/include/ShaderTypes.h
+        headerVisibility: public
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.gzonelee.metalmesh.meshcore
+        PRODUCT_NAME: MeshCore
+        GENERATE_INFOPLIST_FILE: YES
+        DEFINES_MODULE: YES
+        SKIP_INSTALL: YES
+        SWIFT_OPTIMIZATION_LEVEL: "-O"
+        ENABLE_TESTABILITY: YES
+
   MetalMesh:
     type: application
     supportedDestinations: [iOS, macOS]
@@ -30,6 +53,10 @@ targets:
         type: folder
         buildPhase: resources
         optional: true
+    dependencies:
+      - target: MeshCore
+        embed: true
+        codeSign: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gzonelee.metalmesh
@@ -46,9 +73,12 @@ targets:
         INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES
         INFOPLIST_KEY_UIFileSharingEnabled: YES
         TARGETED_DEVICE_FAMILY: "1,2"
-        # Swift/Metal 공유 헤더
-        SWIFT_OBJC_BRIDGING_HEADER: MetalMesh/MetalMesh-Bridging-Header.h
-        MTL_HEADER_SEARCH_PATHS: "$(SRCROOT)/MetalMesh/Rendering/Shaders"
+        # Metal 셰이더가 MeshCore의 ShaderTypes.h를 include
+        MTL_HEADER_SEARCH_PATHS: "$(SRCROOT)/MeshCore/include"
+        # 멀티플랫폼 타깃: 임베드된 프레임워크 위치가 플랫폼마다 다르다
+        "LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]": "$(inherited) @executable_path/../Frameworks"
+        "LD_RUNPATH_SEARCH_PATHS[sdk=iphoneos*]": "$(inherited) @executable_path/Frameworks"
+        "LD_RUNPATH_SEARCH_PATHS[sdk=iphonesimulator*]": "$(inherited) @executable_path/Frameworks"
         # Metal
         MTL_ENABLE_DEBUG_INFO: INCLUDE_SOURCE
         MTL_LANGUAGE_REVISION: Metal30
@@ -73,17 +103,20 @@ targets:
       - path: Tests
     dependencies:
       - target: MetalMesh
+      - target: MeshCore
+        embed: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gzonelee.metalmesh.tests
         GENERATE_INFOPLIST_FILE: YES
-        # 브리징 헤더의 C 타입(Vertex, Meshlet)은 @testable import로 전달되지 않아 테스트도 같은 헤더를 쓴다
-        SWIFT_OBJC_BRIDGING_HEADER: MetalMesh/MetalMesh-Bridging-Header.h
         # 멀티플랫폼 타깃: macOS 번들은 실행 파일이 Contents/MacOS 아래에 있다
         "TEST_HOST[sdk=macosx*]": "$(BUILT_PRODUCTS_DIR)/MetalMesh.app/Contents/MacOS/MetalMesh"
         "TEST_HOST[sdk=iphoneos*]": "$(BUILT_PRODUCTS_DIR)/MetalMesh.app/MetalMesh"
         "TEST_HOST[sdk=iphonesimulator*]": "$(BUILT_PRODUCTS_DIR)/MetalMesh.app/MetalMesh"
         BUNDLE_LOADER: "$(TEST_HOST)"
+        "LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]": "$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks"
+        "LD_RUNPATH_SEARCH_PATHS[sdk=iphoneos*]": "$(inherited) @executable_path/Frameworks @loader_path/Frameworks"
+        "LD_RUNPATH_SEARCH_PATHS[sdk=iphonesimulator*]": "$(inherited) @executable_path/Frameworks @loader_path/Frameworks"
 
 schemes:
   MetalMesh:

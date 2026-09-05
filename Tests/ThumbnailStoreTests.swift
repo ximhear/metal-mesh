@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 @testable import MetalMesh
+@testable import MeshCore
 
 @MainActor
 struct ThumbnailStoreTests {

@@ -1,3 +1,4 @@
+import MeshCore
 import SwiftUI
 import Metal
 

@@ -2,6 +2,7 @@ import Testing
 import Foundation
 import simd
 @testable import MetalMesh
+@testable import MeshCore
 
 struct GLBLoaderTests {
     private func sampleURL(_ relative: String) throws -> URL {

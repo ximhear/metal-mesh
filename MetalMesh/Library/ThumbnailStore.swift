@@ -1,3 +1,4 @@
+import MeshCore
 import CoreGraphics
 import Foundation
 import ImageIO

@@ -1,3 +1,4 @@
+import MeshCore
 import simd
 
 /// 타깃을 중심으로 회전·줌·팬하는 카메라. 메인 스레드에서만 접근한다.

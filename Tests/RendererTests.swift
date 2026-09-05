@@ -3,6 +3,7 @@ import Foundation
 import Metal
 import simd
 @testable import MetalMesh
+@testable import MeshCore
 
 @MainActor
 struct RendererTests {
@@ -179,6 +180,39 @@ struct RendererTests {
         #expect(normalized.bitsPerPixel == 32 && normalized.width == image.width)
         let renderer = try Renderer(device: device, mesh: MeshletBuilder.build(mesh), materials: mesh.materials)
         #expect(renderer.stats.textureCount == 1)
+    }
+
+    @Test func meshletStrategyComparisonOnRealModels() async throws {
+        let device = try #require(self.device)
+        let samples = try #require(Bundle.main.url(forResource: "Samples", withExtension: nil))
+        let target = try makeTarget(device: device, size: 128)
+        for file in ["stanford-bunny/stanford-bunny.obj", "xyzrgb_dragon/xyzrgb_dragon.obj", "lion-noe3d/lion-noe3d.usdz"] {
+            let mesh = try await ModelLoader.load(url: samples.appendingPathComponent(file))
+            var report: [String: (count: Int, culled: Double, radius: Float, cutoff: Float, ms: Double)] = [:]
+            for (name, strategy) in [("spatialScan", MeshletBuilder.Strategy.spatialScan), ("cluster", .cluster)] {
+                let t0 = Date()
+                let meshlets = MeshletBuilder.build(mesh, strategy: strategy)
+                let ms = Date().timeIntervalSince(t0) * 1000
+                let renderer = try Renderer(device: device, mesh: meshlets, materials: mesh.materials)
+                renderer.camera.frame(center: mesh.boundsCenter, radius: mesh.boundsRadius)
+                var visibleSum = 0
+                let views = 6
+                for i in 0..<views {
+                    renderer.camera.yaw = Float(i) / Float(views) * 2 * .pi
+                    visibleSum += renderer.renderFrame(passDescriptor: target.pass, drawable: nil, waitUntilCompleted: true) ?? 0
+                }
+                let culled = 1 - Double(visibleSum) / Double(meshlets.meshlets.count * views)
+                let radius = meshlets.meshlets.map(\.boundsRadius).reduce(0, +) / Float(meshlets.meshlets.count)
+                let cutoff = meshlets.meshlets.map(\.coneCutoff).reduce(0, +) / Float(meshlets.meshlets.count)
+                report[name] = (meshlets.meshlets.count, culled, radius, cutoff, ms)
+                print(String(format: "STRATEGY %@ %@: meshlets=%d culled=%.1f%% meanRadius=%.4f meanCutoff=%.3f build=%.0fms",
+                             (file as NSString).lastPathComponent, name, meshlets.meshlets.count, culled * 100, radius, cutoff, ms))
+            }
+            let scan = try #require(report["spatialScan"]), cluster = try #require(report["cluster"])
+            #expect(cluster.count <= Int(Double(scan.count) * 1.25), "\(file): 메시렛 수가 스캔 대비 25% 이상 늘면 안 된다")
+            #expect(cluster.culled >= scan.culled, "\(file): 컬링률은 좋아져야 한다")
+            #expect(cluster.radius <= scan.radius, "\(file): 경계 구가 작아져야 한다")
+        }
     }
 
     @Test func frustumPlanesContainCameraTarget() {

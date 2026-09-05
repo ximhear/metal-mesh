@@ -34,7 +34,9 @@ mesh 스테이지가 살아남은 메시렛만 삼각형으로 펼칩니다.
 파일 ──▶ ModelLoader (Model I/O)      삼각형화, 노드 변환 적용, 노멀 생성, Vertex{pos,normal,uv} 48B로 정규화
          GLBLoader (glb/gltf)          같은 MeshData를 만드는 자체 glTF 2.0 파서
                                       서브메시 재질에서 baseColor 텍스처/색 추출, 삼각형별 재질 인덱스
-     ──▶ MeshletBuilder (CPU)         재질별로 나눈 뒤 Morton 코드로 공간 정렬 → 정점 ≤64 / 삼각형 ≤126 단위로 묶기
+     ──▶ MeshPostProcess              정점 용접(Model I/O가 면마다 쪼갠 정점 복원), 노멀 없으면 면적 가중 스무스 노멀
+     ──▶ MeshletBuilder (CPU)         인접 삼각형을 정점 재사용·노멀 정렬·거리 점수로 골라 키우는 클러스터링
+                                      (meshoptimizer 방식 단순화, 재질별 분리) → 정점 ≤64 / 삼각형 ≤126
                                       메시렛마다 경계 구 + 노멀 콘(meshoptimizer 규약) + 재질 인덱스
      ──▶ GPUMesh                      vertices / meshlets / meshletVertices / meshletTriangles 버퍼
                                       텍스처(sRGB, 밉맵) + Material 인자 버퍼(리소스 ID)
@@ -45,8 +47,20 @@ mesh 스테이지가 살아남은 메시렛만 삼각형으로 펼칩니다.
             fragment         Material[materialIndex]의 텍스처 샘플링, 2광원 + 스펙큘러, 디버그 모드별 색상
 ```
 
-Swift와 MSL은 `MetalMesh/Rendering/Shaders/ShaderTypes.h` 한 파일에서 `Vertex`, `Meshlet`, `Uniforms`, 버퍼 인덱스를 공유합니다.
+Swift와 MSL은 `MeshCore/include/ShaderTypes.h` 한 파일에서 `Vertex`, `Meshlet`, `Uniforms`, 버퍼 인덱스를 공유합니다.
 레이아웃은 `Tests/ShaderTypesTests.swift`가 고정합니다.
+
+메시 처리 코드(로더, 메시렛 빌더, 수학)는 **MeshCore 프레임워크**로 분리되어 Debug 구성에서도 `-O`로 빌드됩니다.
+`-Onone`에서는 클러스터링이 약 50배 느려(bunny 2.1s vs 40ms) 뷰어 로딩과 썸네일 생성이 체감될 정도로 지연되기 때문입니다.
+앱 본체는 `-Onone`이라 그대로 디버깅할 수 있습니다.
+
+메시렛 클러스터링 효과 (6방향 평균 컬링률, Morton 스캔 → 클러스터):
+
+| 모델 | 삼각형 | 메시렛 | 컬링률 | 평균 경계 구 반지름 |
+|---|---|---|---|---|
+| Stanford Bunny | 69k | 882 → 874 | 21% → 33% | 0.0109 → 0.0067 |
+| XYZ RGB Dragon | 250k | 3,220 → 3,181 | 4.6% → 15.4% | 5.12 → 3.12 |
+| Löwe (사자 석상) | 491k | 7,541 → 7,592 | 11.6% → 23.2% | 3.34 → 2.19 |
 
 ## 요구 사항
 
@@ -70,7 +84,7 @@ open MetalMesh.xcodeproj
 명령줄:
 
 ```bash
-# macOS 빌드 + 테스트 (46개)
+# macOS 빌드 + 테스트 (50개)
 xcodebuild -project MetalMesh.xcodeproj -scheme MetalMesh -destination 'platform=macOS' \
   -derivedDataPath build/DerivedData test
 
@@ -93,16 +107,23 @@ TEST_RUNNER_METALMESH_SNAPSHOTS=1 xcodebuild ... -only-testing:MetalMeshTests/Sn
 ## 프로젝트 구조
 
 ```
-project.yml                     XcodeGen 정의 (iOS/macOS 단일 타깃 + 테스트 타깃)
+project.yml                     XcodeGen 정의 (MeshCore 프레임워크 + iOS/macOS 앱 + 테스트, 모두 멀티플랫폼 단일 타깃)
+MeshCore/                       메시 처리 프레임워크 (Debug에서도 -O)
+  include/ShaderTypes.h         Swift/MSL 공유 타입 (엄브렐라 MeshCore.h)
+  ModelLoader, GLBLoader        Model I/O 로더 / 자체 glTF 로더 → MeshData
+  MeshPostProcess               정점 용접, 스무스 노멀
+  MeshletBuilder                클러스터·스캔 전략, 경계 구·노멀 콘
+  ModelProbe, ModelIOQueue      통계 프로브, Model I/O 직렬화 액터
+  Math                          투영/lookAt/프러스텀 평면
 MetalMesh/
   App/                          진입점, 기기 지원 검사, 미지원 안내
   Library/                      ModelEntry, ModelLibrary(JSON 인덱스 + Documents/Models), ThumbnailStore, 리스트 화면
-  Import/                       ModelIOQueue(직렬화), ModelProbe, ModelLoader, GLBLoader, MeshletBuilder
-  Rendering/                    Renderer, GPUMesh(버퍼·텍스처·재질), RenderSettings, Math, Snapshot, Shaders/
+  Rendering/                    Renderer, GPUMesh(버퍼·텍스처·재질), RenderSettings, Snapshot, Shaders/
   Viewer/                       ModelViewerView, MetalView(제스처), OrbitCamera
   Resources/Samples/            번들 샘플 모델 + 폴더별 LICENSE.txt + MODELS.md
-Tests/                          Swift Testing 46개 (레이아웃, 라이브러리, 썸네일, 로더·재질, glTF, 메시렛, 오프스크린 렌더)
+Tests/                          Swift Testing 50개 (레이아웃, 라이브러리, 썸네일, 로더·재질, glTF, 메시렛, 오프스크린 렌더)
 scripts/probe-model.swift       Model I/O 로드 검증 CLI
+scripts/bench-meshlets.swift    메시렛 빌더 벤치마크 (-O CLI)
 .claude/skills/fetch-3d-model/  무료 소스(Poly Haven, Sketchfab, Poly Pizza, GitHub 테스트 메시)에서 모델을 받는 절차
 PLAN.md                         단계별 계획과 진행 상태
 ```
@@ -111,6 +132,8 @@ PLAN.md                         단계별 계획과 진행 상태
 
 - **libusd 동시 로드 크래시**: Apple의 USD 런타임은 여러 스레드에서 USD 파일을 동시에 처음 열면 크래시합니다
   (`Sdf_GetExtension` 널 포인터). 모든 Model I/O 호출은 `ModelIOQueue` 액터로 직렬화합니다.
+- Model I/O는 노멀이 없는 OBJ에 `addNormals`를 쓰면 면마다 정점을 쪼갭니다(bunny 35k → 208k 정점). 로더는 대신 정점을 용접하고 스무스 노멀을 직접 계산합니다.
+  정점 공유가 없으면 메시렛이 정점 64개 한계에 걸려 삼각형 21개씩만 담기고 인접 기반 클러스터링도 불가능합니다.
 - 래스터라이저 컬링은 끄고(`cullMode = .none`) 뒷면 제거는 object 스테이지의 노멀 콘이 담당합니다. 와인딩이 뒤집힌 파일도 보이게 하기 위함입니다.
 - 재질은 baseColor만 씁니다(노멀·러프니스 맵 무시). USD 재질에는 baseColor 의미 속성이 여러 개일 수 있어(상수 `baseColor` + 텍스처 `diffuseColor`) 텍스처가 있는 쪽을 우선합니다. USDZ 내장 텍스처는 `MDLAsset.loadTextures()` 뒤에만 읽힙니다.
 - Model I/O UV는 좌하단 원점이라 셰이더에서 v를 뒤집어 샘플링합니다.
@@ -122,7 +145,8 @@ PLAN.md                         단계별 계획과 진행 상태
 - [x] baseColor 텍스처 표시
 - [x] 리스트 썸네일(오프스크린 렌더 재사용)
 - [x] 삼각형 전용 최소 GLB 로더
-- [ ] 메시렛 클러스터링 품질 개선(meshoptimizer 방식), LOD
+- [x] 메시렛 클러스터링 품질 개선(meshoptimizer 방식)
+- [ ] LOD
 - [ ] iPhone/iPad 실기기 성능 측정
 
 ## 샘플 모델 라이선스

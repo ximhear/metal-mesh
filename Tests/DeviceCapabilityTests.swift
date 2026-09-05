@@ -1,6 +1,7 @@
 import Testing
 import Metal
 @testable import MetalMesh
+@testable import MeshCore
 
 struct DeviceCapabilityTests {
     @Test func nilDeviceIsUnsupported() {

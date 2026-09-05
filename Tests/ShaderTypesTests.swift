@@ -1,5 +1,6 @@
 import Testing
 @testable import MetalMesh
+@testable import MeshCore
 
 /// ShaderTypes.h의 레이아웃이 Metal 쪽 기대와 같은지 고정한다.
 struct ShaderTypesTests {

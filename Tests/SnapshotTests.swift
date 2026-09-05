@@ -2,6 +2,7 @@ import Testing
 import Foundation
 import Metal
 @testable import MetalMesh
+@testable import MeshCore
 
 /// 문서용 스크린샷 생성. `TEST_RUNNER_METALMESH_SNAPSHOTS=1`로 xcodebuild test를 돌리면
 /// 테스트 호스트의 임시 폴더 `snapshots/`에 PNG를 쓴다.

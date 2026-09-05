@@ -1,3 +1,4 @@
+import MeshCore
 import Foundation
 import Observation
 import UniformTypeIdentifiers
