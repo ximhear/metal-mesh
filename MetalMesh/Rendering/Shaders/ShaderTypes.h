@@ -34,4 +34,30 @@ typedef struct {
     unsigned short triangleCount; // 62
 } Meshlet;
 
+/// 프레임 유니폼. 모델 행렬은 단위행렬로 두고 카메라만 움직인다(모델 공간 == 월드 공간).
+typedef struct {
+    simd_float4x4 modelViewProjection;
+    simd_float4x4 modelView;
+    simd_float3x3 normalMatrix;        // 모델 → 뷰 공간 노멀
+    simd_float4   frustumPlanes[6];    // 모델 공간, 정규화, 안쪽이 양수 (left,right,bottom,top,near,far)
+    simd_float3   cameraPositionModel; // 모델 공간 카메라 위치 (콘 컬링용)
+    unsigned int  meshletCount;
+    unsigned int  debugMode;           // DebugMode: 0 셰이딩, 1 메시렛 색, 2 노멀
+    unsigned int  cullingEnabled;
+    unsigned int  padding;
+} Uniforms;
+
+/// object → mesh 페이로드: 컬링을 통과한 메시렛 인덱스
+typedef struct {
+    unsigned int meshletIndices[OBJECT_THREADS_PER_THREADGROUP];
+} MeshletPayload;
+
+// 버퍼 인덱스 (object / mesh / fragment 스테이지 공통)
+#define BUFFER_UNIFORMS          0
+#define BUFFER_MESHLETS          1
+#define BUFFER_STATS             2   // object 전용: atomic uint (보이는 메시렛 수)
+#define BUFFER_VERTICES          2   // mesh 전용
+#define BUFFER_MESHLET_VERTICES  3
+#define BUFFER_MESHLET_TRIANGLES 4
+
 #endif /* ShaderTypes_h */

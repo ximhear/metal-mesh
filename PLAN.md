@@ -39,19 +39,18 @@ metal-mesh/                          # 저장소 루트
 │   ├── ModelLibrary.swift           # @Observable 저장소, Documents/library.json + Documents/Models/<uuid>/
 │   ├── ModelListView.swift          # List + fileImporter + dropDestination + 삭제
 │   └── ModelRowView.swift
-├── Viewer/                          # 2번 화면: 렌더링
-│   ├── ModelViewerView.swift        # 화면 컨테이너, 로딩 상태, 통계 오버레이, 디버그 토글
-│   ├── MetalView.swift              # MTKView ↔ SwiftUI 브리지 (UIViewRepresentable / NSViewRepresentable)
-│   ├── OrbitCamera.swift            # 드래그 회전, 핀치/휠 줌, 팬
-│   └── Gestures.swift
-├── Rendering/
-│   ├── Renderer.swift               # MTKViewDelegate, 커맨드 인코딩, drawMeshThreadgroups
-│   ├── MeshPipeline.swift           # MTLMeshRenderPipelineDescriptor 생성
+├── Viewer/                          # 2번 화면: 렌더링 (완료)
+│   ├── ModelViewerView.swift        # 로드 상태, MetalView, 툴바, 통계 바, 정보 시트
+│   ├── MetalView.swift              # InteractiveMTKView(제스처) + NSView/UIViewRepresentable 브리지
+│   └── OrbitCamera.swift            # 회전/줌/팬, 경계 구 자동 프레이밍
+├── Rendering/                       # (완료)
+│   ├── Renderer.swift               # MTKViewDelegate, 파이프라인 생성, 트리플 버퍼링, drawMeshThreadgroups, 통계
 │   ├── GPUMesh.swift                # 메시렛 버퍼 세트 (MTLBuffer 묶음)
+│   ├── RenderSettings.swift         # DebugMode, RenderSettings, RenderStats
+│   ├── Math.swift                   # 투영/lookAt/프러스텀 평면 추출
 │   └── Shaders/
-│       ├── ShaderTypes.h            # Swift/MSL 공유 구조체 (Vertex, Meshlet 완료 / Uniforms는 Phase 3)
-│       ├── MeshShaders.metal        # object / mesh / fragment
-│       └── Fallback.metal           # (선택) 미지원 기기용 일반 vertex 파이프라인
+│       ├── ShaderTypes.h            # Swift/MSL 공유 (Vertex, Meshlet, Uniforms, MeshletPayload, 버퍼 인덱스)
+│       └── MeshShaders.metal        # objectMain / meshMain / fragmentMain
 ├── Import/                          # (완료)
 │   ├── ModelIOQueue.swift           # Model I/O 직렬화 액터 (libusd 동시 로드 크래시 회피)
 │   ├── ModelProbe.swift             # 정점/삼각형 수만 세는 경량 로더
@@ -133,17 +132,23 @@ xcodebuild -project MetalMesh.xcodeproj -scheme MetalMesh -destination 'platform
 - [ ] 단위 테스트: Khronos `Duck.glb`, Poly Pizza 모델 1개 로드
 - **완료 기준**: Poly Pizza에서 받은 .glb가 변환 없이 리스트에 추가되고 렌더링
 
-### Phase 3 — 메시 셰이더 렌더러 (핵심)
-- [ ] `ShaderTypes.h` 공유 구조체, `MeshShaders.metal` object/mesh/fragment
-- [ ] `MeshPipeline`: `MTLMeshRenderPipelineDescriptor` + depth state
-- [ ] `Renderer`: 카메라 유니폼, 트리플 버퍼링, `drawMeshThreadgroups`
-- [ ] `OrbitCamera` + 제스처, 모델 경계로 자동 프레이밍
-- **완료 기준**: 리스트에서 모델 탭 → 회전/줌 가능한 셰이딩된 모델 표시
+### Phase 3 — 메시 셰이더 렌더러 (핵심) ✅ (2026-09-05 완료)
+- [x] `ShaderTypes.h`에 Uniforms/MeshletPayload/버퍼 인덱스 추가, `MeshShaders.metal` object→mesh→fragment
+- [x] object: 프러스텀(경계 구) + 노멀 콘 컬링, threadgroup atomic으로 페이로드 압축, 보이는 메시렛 수 atomic 카운터
+- [x] mesh: 메시렛 1개/스레드그룹, set_vertex/set_index/set_primitive(meshletID)
+- [x] fragment: 2광원 + 스펙큘러, 뒷면 노멀 뒤집기, 디버그(메시렛 색/노멀)
+- [x] `Renderer`: MTLMeshRenderPipelineDescriptor, 트리플 버퍼링, `drawMeshThreadgroups`, GPU 시간·가시 메시렛 통계, 오프스크린 렌더 지원
+- [x] `OrbitCamera` + `InteractiveMTKView` 제스처 (macOS: 드래그 회전/휠·핀치 줌/우클릭·⌥드래그 팬, iOS: 1지 회전/2지 팬/핀치 줌)
+- [x] `ModelViewerView`: 로드 → 메시렛 빌드 → 렌더러, 툴바(표시 모드·컬링·와이어프레임·정보 시트), 하단 통계
+- [x] 테스트 5개: 파이프라인 생성, 평면 렌더 커버리지, 콘 컬링으로 뒷면 평면 0개, bunny 컬링(일부만 보임) + 3모드, 프러스텀 평면
+- **완료 기준 충족**: 오프스크린 테스트로 bunny가 그려지고 컬링이 동작함. 화면 확인은 사용자 검증 필요
+- 메모: 래스터라이저 cullMode는 none (와인딩 뒤집힌 파일 대비). 뒷면 제거는 콘 컬링이 담당
 
-### Phase 4 — 컬링 & 디버그
-- [ ] Object shader 프러스텀/콘 컬링, 살아남은 메시렛 수를 GPU 카운터로 읽어 오버레이 표시
-- [ ] 디버그 토글: 메시렛 색상 / 노멀 / 와이어프레임(`triangleFillMode`)
-- [ ] Metal frame capture 로 파이프라인 검증
+### Phase 4 — 컬링 & 디버그 (Phase 3에서 대부분 선반영)
+- [x] Object shader 프러스텀/콘 컬링, 살아남은 메시렛 수를 GPU 카운터로 읽어 오버레이 표시
+- [x] 디버그 토글: 메시렛 색상 / 노멀 / 와이어프레임(`triangleFillMode`)
+- [ ] Metal frame capture 로 파이프라인 검증 (Xcode GPU 캡처, 수동)
+- [ ] 실기기(iPhone/iPad)에서 성능 확인
 - **완료 기준**: 카메라를 돌리면 컬링된 메시렛 수가 변하고 화면 결함 없음
 
 ### Phase 5 — 마무리
