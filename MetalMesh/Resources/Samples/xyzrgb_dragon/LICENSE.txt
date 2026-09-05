@@ -1,0 +1,4 @@
+XYZ RGB Dragon
+Source: http://graphics.stanford.edu/data/3Dscanrep/
+Redistributed via https://github.com/alecjacobson/common-3d-test-models (data/xyzrgb_dragon.obj)
+Terms: Stanford Computer Graphics Laboratory 출처 표기, 비상업 용도

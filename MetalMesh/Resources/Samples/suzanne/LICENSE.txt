@@ -1,0 +1,4 @@
+Suzanne
+Source: Blender Foundation (Blender 기본 프리미티브)
+Redistributed via https://github.com/alecjacobson/common-3d-test-models (data/suzanne.obj)
+Terms: 자유 사용 (Blender 로고 상표는 제외)

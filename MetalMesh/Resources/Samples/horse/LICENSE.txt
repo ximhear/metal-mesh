@@ -1,0 +1,4 @@
+Horse
+Source: Cyberware, Georgia Tech Large Geometric Models Archive
+Redistributed via https://github.com/alecjacobson/common-3d-test-models (data/horse.obj)
+Terms: 연구용 공개 모델, 출처 표기

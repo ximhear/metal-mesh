@@ -1,0 +1,4 @@
+Cow
+Source: Viewpoint Animation Engineering / Sun Microsystems, via Princeton Suggestive Contour Gallery https://gfx.cs.princeton.edu/proj/sugcon/models/
+Redistributed via https://github.com/alecjacobson/common-3d-test-models (data/cow.obj)
+Terms: 연구용 공개 모델, 출처 표기

@@ -1,0 +1,4 @@
+bronze_whale_statue
+Source: https://polyhaven.com/a/bronze_whale_statue
+License: CC0 1.0 (Poly Haven)
+Files: bronze_whale_statue_1k.usdc + textures/ (1k)

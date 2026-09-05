@@ -1,0 +1,4 @@
+Ukulele_01
+Source: https://polyhaven.com/a/Ukulele_01
+License: CC0 1.0 (Poly Haven)
+Files: Ukulele_01_1k.usdc + textures/ (1k)

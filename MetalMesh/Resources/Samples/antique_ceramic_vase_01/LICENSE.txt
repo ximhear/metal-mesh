@@ -1,0 +1,4 @@
+antique_ceramic_vase_01
+Source: https://polyhaven.com/a/antique_ceramic_vase_01
+License: CC0 1.0 (Poly Haven)
+Files: antique_ceramic_vase_01_1k.usdc + textures/ (1k)

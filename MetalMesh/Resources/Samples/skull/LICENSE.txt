@@ -1,0 +1,5 @@
+Skull downloadable
+Author: martinjario — 표기 의무 (Sketchfab)
+Source: https://sketchfab.com/3d-models/1a9db900738d44298b0bc59f68123393
+License: CC Attribution 4.0
+Format: usdz (Sketchfab 변환본)
