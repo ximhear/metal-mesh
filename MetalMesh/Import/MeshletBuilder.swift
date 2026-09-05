@@ -13,19 +13,21 @@ struct MeshletMesh: Sendable {
     var triangleCount: Int { meshlets.reduce(0) { $0 + Int($1.triangleCount) } }
 }
 
-/// 삼각형 리스트를 인덱스 순서대로 훑어 메시렛으로 묶는다 (meshoptimizer의 buildMeshletsScan과 같은 방식).
-/// 정점 캐시 최적화는 하지 않으므로 입력 순서가 좋을수록 메시렛 품질이 좋다.
+/// 삼각형을 공간 순서(Morton 코드)로 정렬한 뒤 순서대로 훑어 메시렛으로 묶는다.
+/// 정렬 덕분에 메시렛이 공간적으로 뭉쳐 경계 구가 작고 노멀 콘이 좁아져 컬링 효율이 높다.
+/// (meshoptimizer의 buildMeshletsScan + 공간 정렬 조합에 해당. 최적 클러스터링은 아니다.)
 enum MeshletBuilder {
     static func build(
         _ mesh: MeshData,
         maxVertices: Int = Int(MESHLET_MAX_VERTICES),
-        maxTriangles: Int = Int(MESHLET_MAX_TRIANGLES)
+        maxTriangles: Int = Int(MESHLET_MAX_TRIANGLES),
+        spatialSort: Bool = true
     ) -> MeshletMesh {
         precondition(maxVertices <= 256 && maxTriangles <= 512, "Metal 메시 셰이더 한계 초과")
         precondition(maxVertices >= 3 && maxTriangles >= 1)
 
         let vertices = mesh.vertices
-        let indices = mesh.indices
+        let indices = spatialSort ? sortedByMortonCode(mesh) : mesh.indices
         let triangleTotal = indices.count / 3
 
         var result = MeshletMesh(vertices: vertices, meshlets: [], meshletVertices: [], meshletTriangles: [])
@@ -79,6 +81,47 @@ enum MeshletBuilder {
         }
         flush(endTriangle: triangleTotal)
         return result
+    }
+
+    /// 삼각형 무게중심의 Morton 코드(30비트)로 삼각형 순서를 재배열한 인덱스 배열을 돌려준다.
+    static func sortedByMortonCode(_ mesh: MeshData) -> [UInt32] {
+        let triangleTotal = mesh.indices.count / 3
+        guard triangleTotal > 1 else { return mesh.indices }
+        let extent = mesh.boundsMax - mesh.boundsMin
+        let scale = SIMD3<Float>(
+            extent.x > 0 ? 1023 / extent.x : 0,
+            extent.y > 0 ? 1023 / extent.y : 0,
+            extent.z > 0 ? 1023 / extent.z : 0
+        )
+        var keys = [(key: UInt32, triangle: Int)]()
+        keys.reserveCapacity(triangleTotal)
+        for t in 0..<triangleTotal {
+            let a = mesh.vertices[Int(mesh.indices[t * 3])].position
+            let b = mesh.vertices[Int(mesh.indices[t * 3 + 1])].position
+            let c = mesh.vertices[Int(mesh.indices[t * 3 + 2])].position
+            let q = ((a + b + c) / 3 - mesh.boundsMin) * scale
+            let x = UInt32(min(max(q.x, 0), 1023)), y = UInt32(min(max(q.y, 0), 1023)), z = UInt32(min(max(q.z, 0), 1023))
+            keys.append((morton(x) | morton(y) << 1 | morton(z) << 2, t))
+        }
+        keys.sort { $0.key < $1.key }
+        var sorted = [UInt32]()
+        sorted.reserveCapacity(mesh.indices.count)
+        for (_, t) in keys {
+            sorted.append(mesh.indices[t * 3])
+            sorted.append(mesh.indices[t * 3 + 1])
+            sorted.append(mesh.indices[t * 3 + 2])
+        }
+        return sorted
+    }
+
+    /// 10비트 정수를 3비트 간격으로 펼친다
+    private static func morton(_ v: UInt32) -> UInt32 {
+        var x = v & 0x3FF
+        x = (x | x << 16) & 0x030000FF
+        x = (x | x << 8) & 0x0300F00F
+        x = (x | x << 4) & 0x030C30C3
+        x = (x | x << 2) & 0x09249249
+        return x
     }
 
     /// 경계 구(AABB 중심 + 최대 거리)와 노멀 콘(meshoptimizer 규약)을 계산한다.

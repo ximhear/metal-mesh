@@ -123,7 +123,8 @@ xcodebuild -project MetalMesh.xcodeproj -scheme MetalMesh -destination 'platform
 - [x] `MeshletBuilder`: 인덱스 순서 그리디 분할, AABB 중심 경계 구, meshoptimizer 규약 노멀 콘(cutoff 1 = 컬링 불가)
 - [x] 테스트 16개: 레이아웃 고정, 삼각형 보존·순서, 한계·인덱스 범위, 경계 구 포함, 평면 콘, 샘플 3종 로드, 동시 로드 안전
 - **완료 기준 충족**: bunny 69,451 삼각형 로드 0.39s, 메시렛 빌드 약 0.2s (Debug, M2 Pro)
-- 남은 일(선택): 정점 캐시 최적화/메시렛 품질 개선(meshoptimizer 포팅), 텍스처 로드는 Phase 5
+- [x] Morton 코드 공간 정렬 후 분할 (bunny 컬링률 8% → 36%, 메시렛 시각화가 패치 형태로 개선)
+- 남은 일(선택): meshoptimizer식 클러스터링으로 품질 추가 개선, 텍스처 로드는 Phase 5
 
 ### Phase 2b — GLB 최소 로더 (Phase 3 이후로 미룰 수 있음)
 - [ ] GLB 컨테이너(JSON 청크 + BIN 청크) 파싱, `meshes[].primitives` 중 TRIANGLES만 처리
@@ -152,7 +153,8 @@ xcodebuild -project MetalMesh.xcodeproj -scheme MetalMesh -destination 'platform
 - **완료 기준**: 카메라를 돌리면 컬링된 메시렛 수가 변하고 화면 결함 없음
 
 ### Phase 5 — 마무리
-- [ ] 썸네일: 뷰어에서 오프스크린 렌더 → PNG 저장 → 리스트에 표시
+- [x] 오프스크린 렌더 → PNG (`Renderer.snapshot`, README 스크린샷 생성에 사용)
+- [ ] 썸네일: snapshot을 리스트 행에 표시
 - [ ] 큰 모델 로딩 진행률, 에러 처리(손상 파일, 미지원 포맷)
 - [ ] (선택) glTF 로더, (선택) meshoptimizer 포팅으로 메시렛 품질 개선, (선택) 다중 LOD
 

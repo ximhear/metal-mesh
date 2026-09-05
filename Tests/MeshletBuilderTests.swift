@@ -42,14 +42,37 @@ struct MeshletBuilderTests {
         return tris
     }
 
-    @Test func preservesEveryTriangleInOrder() {
+    @Test func preservesEveryTriangleInOrderWithoutSorting() {
         let mesh = makeGrid(40)   // 3,200 삼각형 → 여러 메시렛
-        let result = MeshletBuilder.build(mesh)
+        let result = MeshletBuilder.build(mesh, spatialSort: false)
         #expect(result.meshlets.count > 1)
         #expect(result.triangleCount == mesh.triangleCount)
 
         let original = stride(from: 0, to: mesh.indices.count, by: 3).map { Array(mesh.indices[$0..<$0 + 3]) }
         #expect(triangleSet(result) == original)
+    }
+
+    @Test func spatialSortPreservesTriangleSet() {
+        let mesh = makeGrid(40)
+        let result = MeshletBuilder.build(mesh)
+        #expect(result.triangleCount == mesh.triangleCount)
+        let original = stride(from: 0, to: mesh.indices.count, by: 3).map { Array(mesh.indices[$0..<$0 + 3]) }
+        #expect(Set(triangleSet(result)) == Set(original))
+        #expect(triangleSet(result).count == original.count)
+    }
+
+    @Test func spatialSortTightensBoundingSpheres() {
+        // 격자를 무작위 순서로 섞은 뒤 정렬 유무로 평균 경계 구 반지름 비교
+        var mesh = makeGrid(30)
+        var tris = stride(from: 0, to: mesh.indices.count, by: 3).map { Array(mesh.indices[$0..<$0 + 3]) }
+        var rng = SystemRandomNumberGenerator()
+        tris.shuffle(using: &rng)
+        mesh.indices = tris.flatMap { $0 }
+        func meanRadius(_ m: MeshletMesh) -> Float { m.meshlets.map(\.boundsRadius).reduce(0, +) / Float(m.meshlets.count) }
+        let unsorted = MeshletBuilder.build(mesh, spatialSort: false)
+        let sorted = MeshletBuilder.build(mesh, spatialSort: true)
+        #expect(meanRadius(sorted) < meanRadius(unsorted) * 0.5)
+        #expect(sorted.meshlets.count <= unsorted.meshlets.count)
     }
 
     @Test func respectsLimitsAndIndexRanges() {

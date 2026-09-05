@@ -18,7 +18,8 @@ final class OrbitCamera {
         let r = max(radius, 1e-4)
         target = center
         sceneRadius = r
-        distance = r / sin(fovY * 0.5) * 1.15
+        // r은 AABB 반대각선이라 실제 형상보다 크다. 0.9배로 여백을 줄인다.
+        distance = r / sin(fovY * 0.5) * 0.9
         minDistance = r * 0.05
         maxDistance = r * 25
     }
