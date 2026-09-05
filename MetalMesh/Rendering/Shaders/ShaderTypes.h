@@ -26,6 +26,7 @@ typedef struct {
 typedef struct {
     simd_float3  boundsCenter;    // 0   모델 공간 경계 구 중심
     float        boundsRadius;    // 16
+    unsigned int materialIndex;   // 20  Material 배열 인덱스 (메시렛은 재질 하나만 가진다)
     simd_float3  coneAxis;        // 32  정규화된 평균 노멀
     float        coneCutoff;      // 48  meshoptimizer 규약: 1.0이면 컬링 불가
     unsigned int vertexOffset;    // 52  meshletVertices 내 시작 위치
@@ -44,8 +45,23 @@ typedef struct {
     unsigned int  meshletCount;
     unsigned int  debugMode;           // DebugMode: 0 셰이딩, 1 메시렛 색, 2 노멀
     unsigned int  cullingEnabled;
-    unsigned int  padding;
+    unsigned int  texturesEnabled;
 } Uniforms;
+
+/// 재질. Metal 3 인자 버퍼(tier 2)에 그대로 놓인다. 48바이트.
+/// MSL에서는 texture2d가 8바이트 리소스 ID로 저장되므로 C 쪽은 MTLResourceID와 같은 8바이트로 맞춘다.
+#ifdef __METAL_VERSION__
+typedef metal::texture2d<float> BaseColorTexture;
+#else
+typedef struct { unsigned long long _impl; } BaseColorTexture;   // == MTLResourceID
+#endif
+
+typedef struct {
+    BaseColorTexture baseColorTexture;  // 0  (8B, 텍스처 없으면 1x1 흰색 플레이스홀더)
+    simd_float4      baseColorFactor;   // 16
+    unsigned int     hasTexture;        // 32
+    unsigned int     padding[3];
+} Material;
 
 /// object → mesh 페이로드: 컬링을 통과한 메시렛 인덱스
 typedef struct {
@@ -55,6 +71,7 @@ typedef struct {
 // 버퍼 인덱스 (object / mesh / fragment 스테이지 공통)
 #define BUFFER_UNIFORMS          0
 #define BUFFER_MESHLETS          1
+#define BUFFER_MATERIALS         1   // fragment 전용: Material 배열 (인자 버퍼)
 #define BUFFER_STATS             2   // object 전용: atomic uint (보이는 메시렛 수)
 #define BUFFER_VERTICES          2   // mesh 전용
 #define BUFFER_MESHLET_VERTICES  3

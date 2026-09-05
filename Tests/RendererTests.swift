@@ -134,6 +134,40 @@ struct RendererTests {
         }
     }
 
+    @Test func texturedAppleRendersRed() async throws {
+        let device = try #require(self.device)
+        let samples = try #require(Bundle.main.url(forResource: "Samples", withExtension: nil))
+        let mesh = try await ModelLoader.load(url: samples.appendingPathComponent("food_apple_01/food_apple_01_1k.usdc"))
+        let renderer = try Renderer(device: device, mesh: MeshletBuilder.build(mesh), materials: mesh.materials)
+        #expect(renderer.stats.textureCount == 1)
+        renderer.camera.frame(center: mesh.boundsCenter, radius: mesh.boundsRadius)
+        let target = try makeTarget(device: device)
+
+        func meanRGB() -> (r: Double, g: Double, b: Double) {
+            let size = target.size
+            var px = [UInt8](repeating: 0, count: size * size * 4)
+            target.color.getBytes(&px, bytesPerRow: size * 4, from: MTLRegionMake2D(0, 0, size, size), mipmapLevel: 0)
+            var r = 0.0, g = 0.0, b = 0.0, n = 0.0
+            for i in stride(from: 0, to: px.count, by: 4) {
+                // 배경(약 92,92,99) 제외
+                if abs(Int(px[i + 2]) - 92) > 6 || abs(Int(px[i + 1]) - 92) > 6 || abs(Int(px[i]) - 99) > 8 {
+                    b += Double(px[i]); g += Double(px[i + 1]); r += Double(px[i + 2]); n += 1
+                }
+            }
+            return n > 0 ? (r / n, g / n, b / n) : (0, 0, 0)
+        }
+
+        renderer.settings.texturesEnabled = true
+        renderer.renderFrame(passDescriptor: target.pass, drawable: nil, waitUntilCompleted: true)
+        let textured = meanRGB()
+        #expect(textured.r > textured.g * 1.3 && textured.r > textured.b * 1.3, "빨간 사과 텍스처 \(textured)")
+
+        renderer.settings.texturesEnabled = false
+        renderer.renderFrame(passDescriptor: target.pass, drawable: nil, waitUntilCompleted: true)
+        let plain = meanRGB()
+        #expect(abs(plain.r - plain.g) < 12, "텍스처 끄면 무채색 \(plain)")
+    }
+
     @Test func frustumPlanesContainCameraTarget() {
         let camera = OrbitCamera()
         camera.frame(center: SIMD3(1, 2, 3), radius: 2)

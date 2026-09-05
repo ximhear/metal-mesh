@@ -36,6 +36,28 @@ struct ModelLoaderTests {
         #expect(mesh.boundsRadius > 0)
     }
 
+    @Test func extractsBaseColorTextureFromUSDC() async throws {
+        let mesh = try await ModelLoader.load(url: try sampleURL("food_apple_01/food_apple_01_1k.usdc"))
+        #expect(mesh.materials.count == 2, "기본 재질 + 사과 재질")
+        let apple = try #require(mesh.materials.last)
+        let image = try #require(apple.baseColorImage)
+        #expect(image.width == 1024 && image.height == 1024)
+        #expect(!mesh.triangleMaterials.isEmpty)
+        #expect(mesh.triangleMaterials.allSatisfy { $0 == 1 })
+    }
+
+    @Test func extractsEmbeddedTexturesFromUSDZ() async throws {
+        let mesh = try await ModelLoader.load(url: try sampleURL("egyptian-cat/egyptian-cat.usdz"))
+        let textured = mesh.materials.filter { $0.baseColorImage != nil }
+        #expect(!textured.isEmpty, "usdz 내장 텍스처를 읽어야 한다")
+    }
+
+    @Test func plainOBJHasOnlyDefaultMaterial() async throws {
+        let mesh = try await ModelLoader.load(url: try sampleURL("teapot/teapot.obj"))
+        #expect(mesh.materials.count == 1)
+        #expect(mesh.triangleMaterials.isEmpty)
+    }
+
     @Test func bunnyBuildsIntoMeshlets() async throws {
         let url = try sampleURL("stanford-bunny/stanford-bunny.obj")
         let mesh = try await ModelLoader.load(url: url)

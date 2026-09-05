@@ -24,6 +24,9 @@ struct SnapshotTests {
         Shot(file: "xyzrgb_dragon/xyzrgb_dragon.obj", name: "dragon-meshlets", mode: .meshlets, yaw: 1.2, pitch: 0.2),
         Shot(file: "armor-man-horse/armor-man-horse.usdz", name: "armor-normals", mode: .normals, yaw: 0.9, pitch: 0.2),
         Shot(file: "teapot/teapot.obj", name: "teapot-wireframe", mode: .shaded, wireframe: true, yaw: 0.8, pitch: 0.4),
+        Shot(file: "Camera_01/Camera_01_1k.usdc", name: "camera-textured", mode: .shaded, yaw: 0.7, pitch: 0.3),
+        Shot(file: "egyptian-cat/egyptian-cat.usdz", name: "cat-textured", mode: .shaded, yaw: 0.5, pitch: 0.25),
+        Shot(file: "Ukulele_01/Ukulele_01_1k.usdc", name: "ukulele-textured", mode: .shaded, yaw: 0.3, pitch: 0.9),
     ]
 
     @Test func snapshotProducesImage() throws {
@@ -51,7 +54,7 @@ struct SnapshotTests {
 
         for shot in Self.shots {
             let mesh = try await ModelLoader.load(url: samples.appendingPathComponent(shot.file))
-            let renderer = try Renderer(device: device, mesh: MeshletBuilder.build(mesh))
+            let renderer = try Renderer(device: device, mesh: MeshletBuilder.build(mesh), materials: mesh.materials)
             renderer.camera.frame(center: mesh.boundsCenter, radius: mesh.boundsRadius)
             renderer.camera.yaw = shot.yaw
             renderer.camera.pitch = shot.pitch

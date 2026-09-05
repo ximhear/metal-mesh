@@ -12,13 +12,16 @@ mesh 스테이지가 살아남은 메시렛만 삼각형으로 펼칩니다.
 | ![Stanford Bunny](docs/images/bunny-shaded.png) | ![Stanford Bunny meshlets](docs/images/bunny-meshlets.png) |
 | ![Lion statue](docs/images/lion-shaded.png) 사자 석상, 49만 삼각형 (CC0, noe-3d.at) | ![XYZ RGB Dragon meshlets](docs/images/dragon-meshlets.png) XYZ RGB Dragon, 25만 삼각형 → 11,900 메시렛 |
 | ![Armor normals](docs/images/armor-normals.png) 노멀 디버그 뷰 (Cleveland Museum of Art, CC0) | ![Teapot wireframe](docs/images/teapot-wireframe.png) 와이어프레임 |
+| ![Camera textured](docs/images/camera-textured.png) baseColor 텍스처 (Poly Haven Camera 01, CC0) | ![Egyptian cat textured](docs/images/cat-textured.png) USDZ 내장 텍스처 (Egyptian Cat Statue by Ankledot, CC BY) |
 
 이미지는 앱의 렌더러로 오프스크린 렌더링한 결과입니다 (`Tests/SnapshotTests.swift`).
 
 ## 기능
 
 - **모델 라이브러리** 화면: 번들 샘플 25개 자동 등록, 파일 임포터·드래그&드롭으로 추가, 재시작 후에도 유지
-- **뷰어** 화면: 오빗 카메라(회전/줌/팬), 표시 모드(셰이딩·메시렛 색·노멀), 컬링 토글, 와이어프레임, 라이선스 정보 시트
+- **뷰어** 화면: 오빗 카메라(회전/줌/팬), 표시 모드(셰이딩·메시렛 색·노멀), 컬링·와이어프레임·텍스처 토글, 라이선스 정보 시트
+- **baseColor 텍스처**: OBJ(.mtl), USDC(외부 파일), USDZ(내장) 재질에서 추출. 서브메시별 재질을 메시렛 단위로 유지하고
+  Metal 3 인자 버퍼(`MTLResourceID`)로 프래그먼트에서 직접 샘플링
 - 하단 통계: 보이는 메시렛 / 전체 메시렛, 삼각형 수, GPU 프레임 시간
 - 지원 포맷: **OBJ, PLY, STL, USD / USDA / USDC / USDZ** (Model I/O)
 
@@ -26,14 +29,16 @@ mesh 스테이지가 살아남은 메시렛만 삼각형으로 펼칩니다.
 
 ```
 파일 ──▶ ModelLoader (Model I/O)      삼각형화, 노드 변환 적용, 노멀 생성, Vertex{pos,normal,uv} 48B로 정규화
-     ──▶ MeshletBuilder (CPU)         Morton 코드로 삼각형 공간 정렬 → 정점 ≤64 / 삼각형 ≤126 단위로 묶기
-                                      메시렛마다 경계 구 + 노멀 콘(meshoptimizer 규약) 계산
+                                      서브메시 재질에서 baseColor 텍스처/색 추출, 삼각형별 재질 인덱스
+     ──▶ MeshletBuilder (CPU)         재질별로 나눈 뒤 Morton 코드로 공간 정렬 → 정점 ≤64 / 삼각형 ≤126 단위로 묶기
+                                      메시렛마다 경계 구 + 노멀 콘(meshoptimizer 규약) + 재질 인덱스
      ──▶ GPUMesh                      vertices / meshlets / meshletVertices / meshletTriangles 버퍼
+                                      텍스처(sRGB, 밉맵) + Material 인자 버퍼(리소스 ID)
      ──▶ drawMeshThreadgroups
             object 스테이지  스레드 1개 = 메시렛 1개. 프러스텀·콘 컬링 → 살아남은 인덱스를 페이로드에 압축
                              set_threadgroups_per_grid(살아남은 수), atomic 카운터로 통계
             mesh 스테이지    스레드그룹 1개 = 메시렛 1개. set_vertex / set_index / set_primitive(meshletID)
-            fragment         2광원 + 스펙큘러, 디버그 모드별 색상
+            fragment         Material[materialIndex]의 텍스처 샘플링, 2광원 + 스펙큘러, 디버그 모드별 색상
 ```
 
 Swift와 MSL은 `MetalMesh/Rendering/Shaders/ShaderTypes.h` 한 파일에서 `Vertex`, `Meshlet`, `Uniforms`, 버퍼 인덱스를 공유합니다.
@@ -61,7 +66,7 @@ open MetalMesh.xcodeproj
 명령줄:
 
 ```bash
-# macOS 빌드 + 테스트 (31개)
+# macOS 빌드 + 테스트 (37개)
 xcodebuild -project MetalMesh.xcodeproj -scheme MetalMesh -destination 'platform=macOS' \
   -derivedDataPath build/DerivedData test
 
@@ -89,10 +94,10 @@ MetalMesh/
   App/                          진입점, 기기 지원 검사, 미지원 안내
   Library/                      ModelEntry, ModelLibrary(JSON 인덱스 + Documents/Models), 리스트 화면
   Import/                       ModelIOQueue(직렬화), ModelProbe, ModelLoader, MeshletBuilder
-  Rendering/                    Renderer, GPUMesh, RenderSettings, Math, Snapshot, Shaders/
+  Rendering/                    Renderer, GPUMesh(버퍼·텍스처·재질), RenderSettings, Math, Snapshot, Shaders/
   Viewer/                       ModelViewerView, MetalView(제스처), OrbitCamera
   Resources/Samples/            번들 샘플 모델 + 폴더별 LICENSE.txt + MODELS.md
-Tests/                          Swift Testing 31개 (레이아웃, 라이브러리, 로더, 메시렛, 오프스크린 렌더)
+Tests/                          Swift Testing 37개 (레이아웃, 라이브러리, 로더·재질, 메시렛, 오프스크린 렌더)
 scripts/probe-model.swift       Model I/O 로드 검증 CLI
 .claude/skills/fetch-3d-model/  무료 소스(Poly Haven, Sketchfab, Poly Pizza, GitHub 테스트 메시)에서 모델을 받는 절차
 PLAN.md                         단계별 계획과 진행 상태
@@ -103,11 +108,13 @@ PLAN.md                         단계별 계획과 진행 상태
 - **libusd 동시 로드 크래시**: Apple의 USD 런타임은 여러 스레드에서 USD 파일을 동시에 처음 열면 크래시합니다
   (`Sdf_GetExtension` 널 포인터). 모든 Model I/O 호출은 `ModelIOQueue` 액터로 직렬화합니다.
 - 래스터라이저 컬링은 끄고(`cullMode = .none`) 뒷면 제거는 object 스테이지의 노멀 콘이 담당합니다. 와인딩이 뒤집힌 파일도 보이게 하기 위함입니다.
-- 텍스처는 아직 적용하지 않습니다(Poly Haven/Sketchfab 모델은 회색으로 표시). GLB는 Model I/O가 읽지 못해 미지원입니다.
+- 재질은 baseColor만 씁니다(노멀·러프니스 맵 무시). USD 재질에는 baseColor 의미 속성이 여러 개일 수 있어(상수 `baseColor` + 텍스처 `diffuseColor`) 텍스처가 있는 쪽을 우선합니다. USDZ 내장 텍스처는 `MDLAsset.loadTextures()` 뒤에만 읽힙니다.
+- Model I/O UV는 좌하단 원점이라 셰이더에서 v를 뒤집어 샘플링합니다.
+- GLB는 Model I/O가 읽지 못해 미지원입니다.
 
 ## 로드맵
 
-- [ ] baseColor 텍스처 표시
+- [x] baseColor 텍스처 표시
 - [ ] 리스트 썸네일(오프스크린 렌더 재사용)
 - [ ] 삼각형 전용 최소 GLB 로더
 - [ ] 메시렛 클러스터링 품질 개선(meshoptimizer 방식), LOD

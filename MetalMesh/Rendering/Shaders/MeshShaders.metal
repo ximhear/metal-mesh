@@ -67,6 +67,7 @@ struct VertexOut {
 
 struct PrimitiveOut {
     uint meshletID [[flat]];
+    uint materialIndex [[flat]];
 };
 
 using MeshletMesh = mesh<VertexOut, PrimitiveOut, MESHLET_MAX_VERTICES, MESHLET_MAX_TRIANGLES, topology::triangle>;
@@ -103,6 +104,7 @@ void meshMain(MeshletMesh out,
         out.set_index(tid * 3 + 2, meshletTriangles[base + 2]);
         PrimitiveOut prim;
         prim.meshletID = meshletIndex;
+        prim.materialIndex = m.materialIndex;
         out.set_primitive(tid, prim);
     }
 
@@ -122,8 +124,11 @@ static float3 meshletColor(uint id) {
     return 0.35 + 0.65 * c;
 }
 
+constexpr sampler baseColorSampler(address::repeat, filter::linear, mip_filter::linear);
+
 fragment float4 fragmentMain(FragmentIn in [[stage_in]],
-                             constant Uniforms& u [[buffer(BUFFER_UNIFORMS)]])
+                             constant Uniforms& u                  [[buffer(BUFFER_UNIFORMS)]],
+                             const device Material* materials      [[buffer(BUFFER_MATERIALS)]])
 {
     float3 n = normalize(in.v.normalView);
     float3 viewDir = normalize(-in.v.positionView);
@@ -134,7 +139,16 @@ fragment float4 fragmentMain(FragmentIn in [[stage_in]],
     switch (u.debugMode) {
         case 1:  base = meshletColor(in.p.meshletID); break;
         case 2:  base = n * 0.5 + 0.5; break;
-        default: base = float3(0.78, 0.78, 0.80); break;
+        default: {
+            const device Material& m = materials[in.p.materialIndex];
+            base = m.baseColorFactor.rgb;
+            if (u.texturesEnabled && m.hasTexture) {
+                // Model I/O UV는 좌하단 원점, Metal 텍스처는 좌상단 원점 → v 뒤집기
+                float2 uv = float2(in.v.uv.x, 1.0 - in.v.uv.y);
+                base *= m.baseColorTexture.sample(baseColorSampler, uv).rgb;
+            }
+            break;
+        }
     }
 
     float3 keyLight = normalize(float3(0.35, 0.6, 1.0));   // 뷰 공간, 카메라 위쪽에서

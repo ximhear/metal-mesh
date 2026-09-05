@@ -144,6 +144,26 @@ struct MeshletBuilderTests {
         #expect(result.meshlets[0].coneCutoff == 1)
     }
 
+    @Test func meshletsNeverSpanMaterials() {
+        var mesh = makeGrid(20)   // 800 삼각형
+        mesh.materials = [.default, MaterialData(name: "red", baseColorFactor: [1, 0, 0, 1]), MaterialData(name: "blue", baseColorFactor: [0, 0, 1, 1])]
+        // 삼각형을 3개 재질에 번갈아 배정 → 공간 정렬만으로는 섞이게 되는 최악 조건
+        mesh.triangleMaterials = (0..<mesh.triangleCount).map { UInt32($0 % 3) }
+        let result = MeshletBuilder.build(mesh)
+        #expect(result.triangleCount == mesh.triangleCount)
+        let byTriangle = Dictionary(uniqueKeysWithValues: stride(from: 0, to: mesh.indices.count, by: 3).map {
+            (Array(mesh.indices[$0..<$0 + 3]), mesh.triangleMaterials[$0 / 3])
+        })
+        for meshlet in result.meshlets {
+            for t in 0..<Int(meshlet.triangleCount) {
+                let base = Int(meshlet.triangleOffset) + t * 3
+                let tri = (0..<3).map { k in result.meshletVertices[Int(meshlet.vertexOffset) + Int(result.meshletTriangles[base + k])] }
+                #expect(byTriangle[tri] == meshlet.materialIndex)
+            }
+        }
+        #expect(Set(result.meshlets.map(\.materialIndex)) == [0, 1, 2])
+    }
+
     @Test func emptyMeshProducesNoMeshlets() {
         let mesh = MeshData(vertices: [], indices: [], boundsMin: .zero, boundsMax: .zero)
         let result = MeshletBuilder.build(mesh)

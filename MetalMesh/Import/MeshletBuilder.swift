@@ -27,7 +27,14 @@ enum MeshletBuilder {
         precondition(maxVertices >= 3 && maxTriangles >= 1)
 
         let vertices = mesh.vertices
-        let indices = spatialSort ? sortedByMortonCode(mesh) : mesh.indices
+        // 삼각형 순서: 재질 우선, 그 안에서 (선택) Morton 순. 메시렛은 재질 하나만 갖는다.
+        let order = triangleOrder(mesh, spatialSort: spatialSort)
+        var indices = [UInt32](); indices.reserveCapacity(mesh.indices.count)
+        var triangleMaterial = [UInt32](); triangleMaterial.reserveCapacity(order.count)
+        for t in order {
+            indices.append(mesh.indices[t * 3]); indices.append(mesh.indices[t * 3 + 1]); indices.append(mesh.indices[t * 3 + 2])
+            triangleMaterial.append(mesh.materialIndex(ofTriangle: t))
+        }
         let triangleTotal = indices.count / 3
 
         var result = MeshletMesh(vertices: vertices, meshlets: [], meshletVertices: [], meshletTriangles: [])
@@ -65,9 +72,11 @@ enum MeshletBuilder {
                 + (localIndex[Int(c)] < 0 && c != a && c != b ? 1 : 0)
 
             if Int(current.vertexCount) + newVertices > maxVertices
-                || Int(current.triangleCount) + 1 > maxTriangles {
+                || Int(current.triangleCount) + 1 > maxTriangles
+                || (current.triangleCount > 0 && current.materialIndex != triangleMaterial[t]) {
                 flush(endTriangle: t)
             }
+            if current.triangleCount == 0 { current.materialIndex = triangleMaterial[t] }
 
             for v in [a, b, c] {
                 if localIndex[Int(v)] < 0 {
@@ -83,35 +92,32 @@ enum MeshletBuilder {
         return result
     }
 
-    /// 삼각형 무게중심의 Morton 코드(30비트)로 삼각형 순서를 재배열한 인덱스 배열을 돌려준다.
-    static func sortedByMortonCode(_ mesh: MeshData) -> [UInt32] {
+    /// 삼각형 처리 순서. 재질 인덱스 우선, 같은 재질 안에서는 Morton 코드(30비트) 순 또는 원래 순서.
+    static func triangleOrder(_ mesh: MeshData, spatialSort: Bool) -> [Int] {
         let triangleTotal = mesh.indices.count / 3
-        guard triangleTotal > 1 else { return mesh.indices }
+        guard triangleTotal > 0 else { return [] }
         let extent = mesh.boundsMax - mesh.boundsMin
         let scale = SIMD3<Float>(
             extent.x > 0 ? 1023 / extent.x : 0,
             extent.y > 0 ? 1023 / extent.y : 0,
             extent.z > 0 ? 1023 / extent.z : 0
         )
-        var keys = [(key: UInt32, triangle: Int)]()
+        var keys = [(key: UInt64, triangle: Int)]()
         keys.reserveCapacity(triangleTotal)
         for t in 0..<triangleTotal {
-            let a = mesh.vertices[Int(mesh.indices[t * 3])].position
-            let b = mesh.vertices[Int(mesh.indices[t * 3 + 1])].position
-            let c = mesh.vertices[Int(mesh.indices[t * 3 + 2])].position
-            let q = ((a + b + c) / 3 - mesh.boundsMin) * scale
-            let x = UInt32(min(max(q.x, 0), 1023)), y = UInt32(min(max(q.y, 0), 1023)), z = UInt32(min(max(q.z, 0), 1023))
-            keys.append((morton(x) | morton(y) << 1 | morton(z) << 2, t))
+            var spatial: UInt64 = UInt64(t)   // 정렬 안 하면 원래 순서 유지
+            if spatialSort {
+                let a = mesh.vertices[Int(mesh.indices[t * 3])].position
+                let b = mesh.vertices[Int(mesh.indices[t * 3 + 1])].position
+                let c = mesh.vertices[Int(mesh.indices[t * 3 + 2])].position
+                let q = ((a + b + c) / 3 - mesh.boundsMin) * scale
+                let x = UInt32(min(max(q.x, 0), 1023)), y = UInt32(min(max(q.y, 0), 1023)), z = UInt32(min(max(q.z, 0), 1023))
+                spatial = UInt64(morton(x) | morton(y) << 1 | morton(z) << 2)
+            }
+            keys.append((UInt64(mesh.materialIndex(ofTriangle: t)) << 32 | spatial, t))
         }
         keys.sort { $0.key < $1.key }
-        var sorted = [UInt32]()
-        sorted.reserveCapacity(mesh.indices.count)
-        for (_, t) in keys {
-            sorted.append(mesh.indices[t * 3])
-            sorted.append(mesh.indices[t * 3 + 1])
-            sorted.append(mesh.indices[t * 3 + 2])
-        }
-        return sorted
+        return keys.map(\.triangle)
     }
 
     /// 10비트 정수를 3비트 간격으로 펼친다

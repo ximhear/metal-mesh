@@ -52,6 +52,10 @@ struct ModelViewerView: View {
                 Toggle(isOn: $settings.wireframe) {
                     Label("와이어프레임", systemImage: "grid")
                 }
+                Toggle(isOn: $settings.texturesEnabled) {
+                    Label("텍스처", systemImage: "photo")
+                }
+                .disabled(stats.textureCount == 0)
                 Button {
                     showInfo = true
                 } label: {
@@ -100,7 +104,7 @@ struct ModelViewerView: View {
             let mesh = try await ModelLoader.load(url: url)
             state = .loading("메시렛 생성 중… (\(mesh.triangleCount.formatted()) 삼각형)")
             let meshlets = await Task.detached(priority: .userInitiated) { MeshletBuilder.build(mesh) }.value
-            let renderer = try Renderer(device: device, mesh: meshlets)
+            let renderer = try Renderer(device: device, mesh: meshlets, materials: mesh.materials)
             renderer.camera.frame(center: mesh.boundsCenter, radius: mesh.boundsRadius)
             renderer.onStats = { stats = $0 }
             stats = renderer.stats
@@ -130,6 +134,7 @@ private struct ModelInfoView: View {
                     LabeledContent("정점", value: stats.vertexCount.formatted())
                     LabeledContent("삼각형", value: stats.triangleCount.formatted())
                     LabeledContent("메시렛", value: stats.meshletCount.formatted())
+                    LabeledContent("재질 / 텍스처", value: "\(stats.materialCount) / \(stats.textureCount)")
                     LabeledContent("메시렛 한계", value: "정점 \(MESHLET_MAX_VERTICES) · 삼각형 \(MESHLET_MAX_TRIANGLES)")
                 }
                 if let license = entry.licenseText?.trimmingCharacters(in: .whitespacesAndNewlines), !license.isEmpty {

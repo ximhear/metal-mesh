@@ -41,12 +41,14 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     private(set) var stats = RenderStats()
 
-    init(device: MTLDevice, mesh: MeshletMesh) throws {
-        guard device.supportsFamily(.metal3) else { throw Error.meshShadersUnsupported }
+    init(device: MTLDevice, mesh: MeshletMesh, materials: [MaterialData] = [.default]) throws {
+        guard device.supportsFamily(.metal3), device.argumentBuffersSupport == .tier2 else {
+            throw Error.meshShadersUnsupported
+        }
         self.device = device
         guard let queue = device.makeCommandQueue() else { throw Error.meshShadersUnsupported }
         commandQueue = queue
-        gpuMesh = try GPUMesh(device: device, mesh: mesh)
+        gpuMesh = try GPUMesh(device: device, mesh: mesh, materials: materials)
 
         guard let library = device.makeDefaultLibrary() else { throw Error.libraryNotFound }
         func function(_ name: String) throws -> MTLFunction {
@@ -87,6 +89,8 @@ final class Renderer: NSObject, MTKViewDelegate {
         stats.meshletCount = gpuMesh.meshletCount
         stats.triangleCount = gpuMesh.triangleCount
         stats.vertexCount = gpuMesh.vertexCount
+        stats.materialCount = gpuMesh.materialCount
+        stats.textureCount = gpuMesh.textureCount
         super.init()
     }
 
@@ -139,6 +143,9 @@ final class Renderer: NSObject, MTKViewDelegate {
         encoder.setMeshBuffer(gpuMesh.meshletTriangles, offset: 0, index: Int(BUFFER_MESHLET_TRIANGLES))
 
         encoder.setFragmentBuffer(uniformBuffers[slot], offset: 0, index: Int(BUFFER_UNIFORMS))
+        encoder.setFragmentBuffer(gpuMesh.materials, offset: 0, index: Int(BUFFER_MATERIALS))
+        // 인자 버퍼로 간접 참조되는 텍스처는 명시적으로 상주시켜야 한다
+        encoder.useResources(gpuMesh.textures, usage: .read, stages: .fragment)
 
         let objectThreads = Int(OBJECT_THREADS_PER_THREADGROUP)
         let threadgroups = (gpuMesh.meshletCount + objectThreads - 1) / objectThreads
@@ -193,6 +200,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         u.meshletCount = UInt32(gpuMesh.meshletCount)
         u.debugMode = settings.debugMode.rawValue
         u.cullingEnabled = settings.cullingEnabled ? 1 : 0
+        u.texturesEnabled = settings.texturesEnabled ? 1 : 0
 
         let planes = Math.frustumPlanes(from: viewProjection)
         withUnsafeMutablePointer(to: &u.frustumPlanes) { tuple in

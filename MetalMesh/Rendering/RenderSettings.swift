@@ -19,6 +19,7 @@ struct RenderSettings: Equatable {
     var debugMode: DebugMode = .shaded
     var cullingEnabled = true
     var wireframe = false
+    var texturesEnabled = true
 }
 
 /// 렌더러가 프레임마다 채우는 통계. 메인 스레드에서 갱신된다.
@@ -27,6 +28,8 @@ struct RenderStats: Equatable {
     var visibleMeshletCount = 0
     var triangleCount = 0
     var vertexCount = 0
+    var materialCount = 0
+    var textureCount = 0
     /// 초 단위 GPU 시간
     var gpuTime: Double = 0
 }

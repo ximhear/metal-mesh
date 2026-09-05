@@ -153,6 +153,9 @@ xcodebuild -project MetalMesh.xcodeproj -scheme MetalMesh -destination 'platform
 - **완료 기준**: 카메라를 돌리면 컬링된 메시렛 수가 변하고 화면 결함 없음
 
 ### Phase 5 — 마무리
+- [x] **baseColor 텍스처** (2026-09-06): ModelLoader가 서브메시 재질에서 텍스처/색 추출(텍스처 우선, usdz는 loadTextures),
+  MeshletBuilder가 재질별로 묶고 `Meshlet.materialIndex` 기록, GPUMesh가 sRGB 밉맵 텍스처 + `Material` 인자 버퍼(리소스 ID) 생성,
+  fragment가 `useResources`된 텍스처를 직접 샘플링. 테스트 6개 추가(총 37개)
 - [x] 오프스크린 렌더 → PNG (`Renderer.snapshot`, README 스크린샷 생성에 사용)
 - [ ] 썸네일: snapshot을 리스트 행에 표시
 - [ ] 큰 모델 로딩 진행률, 에러 처리(손상 파일, 미지원 포맷)

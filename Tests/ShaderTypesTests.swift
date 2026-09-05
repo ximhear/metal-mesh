@@ -13,12 +13,22 @@ struct ShaderTypesTests {
     @Test func meshletLayout() {
         #expect(MemoryLayout<Meshlet>.stride == 64)
         #expect(MemoryLayout<Meshlet>.offset(of: \.boundsRadius) == 16)
+        #expect(MemoryLayout<Meshlet>.offset(of: \.materialIndex) == 20)
         #expect(MemoryLayout<Meshlet>.offset(of: \.coneAxis) == 32)
         #expect(MemoryLayout<Meshlet>.offset(of: \.coneCutoff) == 48)
         #expect(MemoryLayout<Meshlet>.offset(of: \.vertexOffset) == 52)
         #expect(MemoryLayout<Meshlet>.offset(of: \.triangleOffset) == 56)
         #expect(MemoryLayout<Meshlet>.offset(of: \.vertexCount) == 60)
         #expect(MemoryLayout<Meshlet>.offset(of: \.triangleCount) == 62)
+    }
+
+    @Test func materialLayoutMatchesArgumentBuffer() {
+        // MSL: texture2d(8B) @0, float4 @16, uint @32 → 48B
+        #expect(MemoryLayout<Material>.stride == 48)
+        #expect(MemoryLayout<Material>.offset(of: \.baseColorTexture) == 0)
+        #expect(MemoryLayout<BaseColorTexture>.size == 8)
+        #expect(MemoryLayout<Material>.offset(of: \.baseColorFactor) == 16)
+        #expect(MemoryLayout<Material>.offset(of: \.hasTexture) == 32)
     }
 
     @Test func limitsWithinMetalMaximums() {
