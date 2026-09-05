@@ -1,0 +1,5 @@
+Sculpture "Bust of Róża Loewenfeld"
+Author: WirtualneMuzeaMalopolski (Sketchfab)
+Source: https://sketchfab.com/3d-models/fc6e731a0131471ba8e45511c7ea9996
+License: CC0 Public Domain
+Format: usdz (Sketchfab 변환본), faces ≈ 60,395

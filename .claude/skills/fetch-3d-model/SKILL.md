@@ -9,8 +9,8 @@ description: 무료(CC0/CC-BY/공개 연구용) 사이트에서 3D 모델 파일
 GLB는 앱의 자체 GLB 로더(PLAN.md Phase 2b)가 들어간 뒤 지원. 그 전에는 변환(아래 5절) 없이 받지 않는다.
 현재 로더 지원 상태는 `Import/ModelLoader.swift`의 확장자 목록으로 확인한다.
 
-저장 위치: `Resources/Samples/<모델이름>/` (파일 + `LICENSE.txt`)
-기록 위치: `Resources/Samples/MODELS.md` (이름, 출처 URL, 라이선스, 포맷, 정점 수 한 줄씩 append)
+저장 위치: `MetalMesh/Resources/Samples/<모델이름>/` (파일 + `LICENSE.txt`) — 저장소 루트 기준
+기록 위치: `MetalMesh/Resources/Samples/MODELS.md` (이름, 출처 URL, 라이선스, 포맷, 정점 수 한 줄씩 append)
 
 ## 1. 소스 우선순위 (2026-09 동작 확인. Sketchfab·Poly Pizza는 API 키 필요)
 
@@ -43,7 +43,7 @@ import json,subprocess,os
 d=json.load(open("/tmp/ph.json"))
 res="1k"                      # 1k/2k/4k — 기본 1k, 사용자가 요구하면 변경
 u=d["usd"][res]["usd"]
-out=f"Resources/Samples/<asset_id>"
+out=f"MetalMesh/Resources/Samples/<asset_id>"
 os.makedirs(out+"/textures",exist_ok=True)
 subprocess.run(["curl","-sL","-o",f"{out}/{os.path.basename(u['url'])}",u["url"]],check=True)
 for rel,f in u["include"].items():
@@ -59,7 +59,7 @@ EOF
 ```bash
 BASE=https://raw.githubusercontent.com/alecjacobson/common-3d-test-models/master
 curl -sL "$BASE/README.md" | grep -i "<이름>"          # 파일명과 라이선스 열 확인
-curl -sL -o Resources/Samples/<이름>/<이름>.obj "$BASE/data/<파일명>.obj"
+curl -sL -o MetalMesh/Resources/Samples/<이름>/<이름>.obj "$BASE/data/<파일명>.obj"
 ```
 
 주요 파일명: `stanford-bunny.obj`, `armadillo.obj`, `teapot.obj`, `cow.obj`, `spot.obj`, `nefertiti.obj`, `xyzrgb_dragon.obj`.
@@ -71,7 +71,7 @@ README의 라이선스 열을 그대로 `LICENSE.txt`에 옮긴다. 비상업 �
 curl -sL -o /tmp/bunny.tar.gz http://graphics.stanford.edu/pub/3Dscanrep/bunny.tar.gz
 tar -xzf /tmp/bunny.tar.gz -C /tmp
 # reconstruction/bun_zipper.ply 가 전체 메시. 해상도 축소판: bun_zipper_res2/3/4.ply
-cp /tmp/bunny/reconstruction/bun_zipper.ply Resources/Samples/stanford-bunny-ply/
+cp /tmp/bunny/reconstruction/bun_zipper.ply MetalMesh/Resources/Samples/stanford-bunny-ply/
 ```
 
 다른 모델: `dragon_recon.tar.gz`, `happy_recon.tar.gz`, `armadillo.tar.gz`, `lucy.tar.gz`(1.4억 삼각형, 매우 큼 — 사용자 요청 없으면 받지 않음).
@@ -85,6 +85,7 @@ cp /tmp/bunny/reconstruction/bun_zipper.ply Resources/Samples/stanford-bunny-ply
 ```bash
 set -a; source .env.local; set +a
 # 1) 검색: downloadable=true 필수. 결과의 license.label, user.username, faceCount 확인
+#    `license=` 필터는 uid 값이 아니라 특정 선택지만 받으므로 쓰지 말고 결과의 license.label로 골라낸다
 curl -s "https://api.sketchfab.com/v3/search?type=models&downloadable=true&q=<키워드>&count=10&sort_by=-likeCount" > /tmp/sf.json
 python3 -c '
 import json; d=json.load(open("/tmp/sf.json"))
@@ -95,7 +96,7 @@ for m in d["results"]:
 MID=<uid>
 curl -s -H "Authorization: Token $SKETCHFAB_API_KEY" "https://api.sketchfab.com/v3/models/$MID/download" > /tmp/sfdl.json
 URL=$(python3 -c 'import json; d=json.load(open("/tmp/sfdl.json")); print((d.get("usdz") or d["glb"])["url"])')
-mkdir -p Resources/Samples/<이름> && curl -sL -o Resources/Samples/<이름>/<이름>.usdz "$URL"
+mkdir -p MetalMesh/Resources/Samples/<이름> && curl -sL -o MetalMesh/Resources/Samples/<이름>/<이름>.usdz "$URL"
 ```
 
 - `usdz` 키는 압축된 .usdz 단일 파일. `gltf` 키는 zip이라 풀어야 함. `source`는 원본(대용량, 받지 않음).
@@ -118,7 +119,7 @@ import json; d=json.load(open("/tmp/pp.json"))
 for m in d["results"]:
     print(m["ID"], "|", m["Title"], "|", m["Licence"], "|", m["Creator"]["Username"], "|", m["Download"])'
 # 다운로드 (Download 필드는 static.poly.pizza/*.glb 직접 링크, 키 불필요)
-mkdir -p Resources/Samples/<이름> && curl -sL -o Resources/Samples/<이름>/<이름>.glb "<Download URL>"
+mkdir -p MetalMesh/Resources/Samples/<이름> && curl -sL -o MetalMesh/Resources/Samples/<이름>/<이름>.glb "<Download URL>"
 ```
 
 - 라이선스는 결과의 `Licence` 필드를 그대로 기록. **CC-BY 3.0이면 `LICENSE.txt`에 Creator.Username을 반드시 표기**.
@@ -134,8 +135,8 @@ Blender가 없으면 변환하지 않고 사용자에게 알린다. 변환 코�
 ## 6. 받은 뒤 반드시 할 것
 
 1. 파일 크기와 확장자 확인 (`ls -la`, `file`). 0바이트/HTML 응답이면 실패로 보고.
-2. 정점·삼각형 수 개략 확인: OBJ는 `grep -c "^v " / grep -c "^f "`, PLY는 헤더의 `element vertex/face`.
-3. `Resources/Samples/MODELS.md`에 한 줄 append.
+2. 정점·삼각형 수 확인: 모든 포맷 공통으로 Model I/O 프로브 스크립트를 쓴다 (`scripts/probe-model.swift`, `swiftc -O`로 컴파일 후 파일 경로들을 인자로). 로드 실패 시 앱에서도 실패하므로 받지 않는다.
+3. `MetalMesh/Resources/Samples/MODELS.md`에 한 줄 append.
 4. Xcode 프로젝트가 XcodeGen이면 `Resources/` 폴더 참조라 재생성 불필요. 아니면 `xcodegen generate` 안내.
 5. 사용자에게 받은 파일 경로, 크기, 삼각형 수, 라이선스를 짧게 보고.
 

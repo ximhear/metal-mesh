@@ -1,0 +1,4 @@
+Spot (Keenan Crane)
+Source: https://www.cs.cmu.edu/~kmcrane/Projects/ModelRepository/#spot
+Redistributed via https://github.com/alecjacobson/common-3d-test-models (data/spot.obj)
+Terms: Keenan Crane 모델 저장소는 CC0 (public domain). 저장소 README에는 "missing"으로 표기되어 있어 원본 페이지 기준으로 기록.

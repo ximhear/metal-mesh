@@ -1,0 +1,4 @@
+Stanford Bunny
+Source: Stanford Computer Graphics Laboratory, http://graphics.stanford.edu/data/3Dscanrep/
+Redistributed via https://github.com/alecjacobson/common-3d-test-models (data/stanford-bunny.obj)
+Terms: 출처 표기 필요, 비상업 용도. 논문 인용: Turk & Levoy, SIGGRAPH 1994.

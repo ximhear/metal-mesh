@@ -14,8 +14,9 @@ settings:
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
     ENABLE_USER_SCRIPT_SANDBOXING: YES
-    # 명령줄 빌드 검증용. Xcode에서 실기기 배포 시 Signing 탭에서 팀 지정
     CODE_SIGN_STYLE: Automatic
+    # 개인 개발 팀. 다른 팀으로 바꾸려면 여기만 수정 후 `xcodegen generate`
+    DEVELOPMENT_TEAM: WD3LPJ2STX
 
 targets:
   MetalMesh:

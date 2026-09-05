@@ -1,0 +1,4 @@
+Utah Teapot (Martin Newell, 1975)
+Source: ftp://ftp.funet.fi/pub/sci/graphics/packages/objects/teaset.tar.Z
+Redistributed via https://github.com/alecjacobson/common-3d-test-models (data/teapot.obj)
+Terms: README에 라이선스 표기 없음("missing"). 역사적으로 자유롭게 사용되는 공개 데이터셋. 출처 표기.
