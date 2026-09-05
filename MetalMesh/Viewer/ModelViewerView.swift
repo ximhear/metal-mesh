@@ -2,6 +2,36 @@ import MeshCore
 import SwiftUI
 import Metal
 
+/// 렌더 통계를 SwiftUI에 노출한다. 속성별로 관찰되므로 프레임마다 바뀌는 값(가시 메시렛, GPU 시간)은
+/// 그것을 읽는 통계 바만 다시 그리고, 툴바(textureCount만 읽음)는 영향을 받지 않는다.
+@MainActor
+@Observable
+final class ViewerStatsModel {
+    var meshletCount = 0
+    var triangleCount = 0
+    var vertexCount = 0
+    var materialCount = 0
+    var textureCount = 0
+    var visibleMeshletCount = 0
+    var gpuTime: Double = 0
+
+    func apply(_ stats: RenderStats) {
+        // 같은 값 대입도 관찰자를 깨우므로 바뀐 것만 쓴다
+        if meshletCount != stats.meshletCount { meshletCount = stats.meshletCount }
+        if triangleCount != stats.triangleCount { triangleCount = stats.triangleCount }
+        if vertexCount != stats.vertexCount { vertexCount = stats.vertexCount }
+        if materialCount != stats.materialCount { materialCount = stats.materialCount }
+        if textureCount != stats.textureCount { textureCount = stats.textureCount }
+        if visibleMeshletCount != stats.visibleMeshletCount { visibleMeshletCount = stats.visibleMeshletCount }
+        if gpuTime != stats.gpuTime { gpuTime = stats.gpuTime }
+    }
+
+    var snapshot: RenderStats {
+        RenderStats(meshletCount: meshletCount, visibleMeshletCount: visibleMeshletCount, triangleCount: triangleCount,
+                    vertexCount: vertexCount, materialCount: materialCount, textureCount: textureCount, gpuTime: gpuTime)
+    }
+}
+
 /// 모델 하나를 메시 셰이더로 렌더링하는 화면
 struct ModelViewerView: View {
     @Environment(ModelLibrary.self) private var library
@@ -15,7 +45,7 @@ struct ModelViewerView: View {
 
     @State private var state: LoadState = .loading("준비 중…")
     @State private var settings = RenderSettings()
-    @State private var stats = RenderStats()
+    @State private var stats = ViewerStatsModel()
     @State private var showInfo = false
 
     var body: some View {
@@ -35,7 +65,11 @@ struct ModelViewerView: View {
             }
         }
         .overlay(alignment: .bottom) {
-            if case .ready = state { statsBar }
+            if case .ready = state { StatsBar(stats: stats) }
+        }
+        .onChange(of: settings) { _, newValue in
+            // 표시 옵션은 다음 프레임에 바로 반영 (MetalView 갱신을 기다리지 않는다)
+            if case .ready(let renderer) = state { renderer.settings = newValue }
         }
         .navigationTitle(entry.name)
         #if os(iOS)
@@ -76,7 +110,7 @@ struct ModelViewerView: View {
             #endif
         }
         .sheet(isPresented: $showInfo) {
-            ModelInfoView(entry: entry, fileURL: library.fileURL(for: entry), stats: stats)
+            ModelInfoView(entry: entry, fileURL: library.fileURL(for: entry), stats: stats.snapshot)
         }
         .task(id: entry.id) { await load() }
     }
@@ -86,26 +120,6 @@ struct ModelViewerView: View {
             showInfo = true
         } label: {
             Label("정보", systemImage: "info.circle")
-        }
-    }
-
-    private var statsBar: some View {
-        HStack(spacing: 14) {
-            statItem("메시렛", "\(stats.visibleMeshletCount.formatted()) / \(stats.meshletCount.formatted())")
-            statItem("삼각형", stats.triangleCount.formatted())
-            statItem("GPU", String(format: "%.2f ms", stats.gpuTime * 1000))
-        }
-        .font(.caption.monospacedDigit())
-        .padding(.horizontal, 12).padding(.vertical, 6)
-        .background(.black.opacity(0.55), in: Capsule())
-        .foregroundStyle(.white)
-        .padding(.bottom, 10)
-    }
-
-    private func statItem(_ title: String, _ value: String) -> some View {
-        HStack(spacing: 4) {
-            Text(title).foregroundStyle(.white.opacity(0.6))
-            Text(value)
         }
     }
 
@@ -126,11 +140,37 @@ struct ModelViewerView: View {
             let meshlets = await Task.detached(priority: .userInitiated) { MeshletBuilder.build(mesh) }.value
             let renderer = try Renderer(device: device, mesh: meshlets, materials: mesh.materials)
             renderer.camera.frame(center: mesh.boundsCenter, radius: mesh.boundsRadius)
-            renderer.onStats = { stats = $0 }
-            stats = renderer.stats
+            renderer.settings = settings
+            renderer.onStats = { [stats] in stats.apply($0) }
+            stats.apply(renderer.stats)
             state = .ready(renderer)
         } catch {
             state = .failed(error.localizedDescription)
+        }
+    }
+}
+
+/// 하단 통계 바. 프레임 통계만 이 뷰가 다시 그린다.
+private struct StatsBar: View {
+    let stats: ViewerStatsModel
+
+    var body: some View {
+        HStack(spacing: 14) {
+            item("메시렛", "\(stats.visibleMeshletCount.formatted()) / \(stats.meshletCount.formatted())")
+            item("삼각형", stats.triangleCount.formatted())
+            item("GPU", String(format: "%.2f ms", stats.gpuTime * 1000))
+        }
+        .font(.caption.monospacedDigit())
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(.black.opacity(0.55), in: Capsule())
+        .foregroundStyle(.white)
+        .padding(.bottom, 10)
+    }
+
+    private func item(_ title: String, _ value: String) -> some View {
+        HStack(spacing: 4) {
+            Text(title).foregroundStyle(.white.opacity(0.6))
+            Text(value)
         }
     }
 }
