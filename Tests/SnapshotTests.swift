@@ -18,6 +18,8 @@ struct SnapshotTests {
         var zoom: Float = 1
         var lod: Bool = false
         var lodThreshold: Float = 1
+        var renderScale: Float = 1
+        var msaa: Int = 1
     }
 
     static let shots: [Shot] = [
@@ -38,6 +40,9 @@ struct SnapshotTests {
         Shot(file: "stanford-bunny/stanford-bunny.obj", name: "bunny-lod-wire", mode: .shaded, wireframe: true, zoom: 1.6, lod: true, lodThreshold: 2),
         Shot(file: "stanford-bunny/stanford-bunny.obj", name: "bunny-lod-meshlets", mode: .meshlets, zoom: 1.6, lod: true, lodThreshold: 2),
         Shot(file: "xyzrgb_dragon/xyzrgb_dragon.obj", name: "dragon-lod-wire", mode: .shaded, wireframe: true, yaw: 1.2, pitch: 0.2, zoom: 1.6, lod: true, lodThreshold: 2),
+        // MetalFX 공간 업스케일 50% / MSAA 4x
+        Shot(file: "Camera_01/Camera_01_1k.usdc", name: "camera-metalfx-50", mode: .shaded, yaw: 0.7, pitch: 0.3, renderScale: 0.5),
+        Shot(file: "Camera_01/Camera_01_1k.usdc", name: "camera-msaa4", mode: .shaded, yaw: 0.7, pitch: 0.3, msaa: 4),
     ]
 
     @Test func snapshotProducesImage() throws {
@@ -74,6 +79,8 @@ struct SnapshotTests {
             var settings = RenderSettings(debugMode: shot.mode, cullingEnabled: true, wireframe: shot.wireframe)
             settings.lodEnabled = shot.lod
             settings.lodThresholdPx = shot.lodThreshold
+            settings.renderScale = shot.renderScale
+            settings.msaaSamples = shot.msaa
             renderer.settings = settings
             let image = try #require(renderer.snapshot(width: 1200, height: 900))
             let png = try #require(Renderer.pngData(image))

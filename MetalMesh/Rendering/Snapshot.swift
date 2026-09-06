@@ -11,21 +11,13 @@ extension Renderer {
         let colorDesc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: Self.colorPixelFormat, width: width, height: height, mipmapped: false)
         colorDesc.usage = [.renderTarget]
         colorDesc.storageMode = .shared
-        let depthDesc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: Self.depthPixelFormat, width: width, height: height, mipmapped: false)
-        depthDesc.usage = [.renderTarget, .shaderRead]
-        depthDesc.storageMode = .private
-        guard let color = device.makeTexture(descriptor: colorDesc),
-              let depth = device.makeTexture(descriptor: depthDesc) else { return nil }
+        guard let color = device.makeTexture(descriptor: colorDesc) else { return nil }
 
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = color
         pass.colorAttachments[0].loadAction = .clear
         pass.colorAttachments[0].storeAction = .store
         pass.colorAttachments[0].clearColor = Self.clearColor
-        pass.depthAttachment.texture = depth
-        pass.depthAttachment.loadAction = .clear
-        pass.depthAttachment.storeAction = .dontCare
-        pass.depthAttachment.clearDepth = 1
 
         let previousAspect = camera.aspect
         camera.aspect = Float(width) / Float(height)

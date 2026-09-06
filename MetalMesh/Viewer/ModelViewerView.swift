@@ -17,6 +17,11 @@ final class ViewerStatsModel {
     var drawnTriangleCount = 0
     var lodLevelCount = 1
     var gpuTime: Double = 0
+    var renderWidth = 0
+    var renderHeight = 0
+    var outputWidth = 0
+    var outputHeight = 0
+    var upscalerActive = false
 
     func apply(_ stats: RenderStats) {
         // 같은 값 대입도 관찰자를 깨우므로 바뀐 것만 쓴다
@@ -29,13 +34,19 @@ final class ViewerStatsModel {
         if occludedMeshletCount != stats.occludedMeshletCount { occludedMeshletCount = stats.occludedMeshletCount }
         if drawnTriangleCount != stats.drawnTriangleCount { drawnTriangleCount = stats.drawnTriangleCount }
         if lodLevelCount != stats.lodLevelCount { lodLevelCount = stats.lodLevelCount }
+        if renderWidth != stats.renderWidth { renderWidth = stats.renderWidth }
+        if renderHeight != stats.renderHeight { renderHeight = stats.renderHeight }
+        if outputWidth != stats.outputWidth { outputWidth = stats.outputWidth }
+        if outputHeight != stats.outputHeight { outputHeight = stats.outputHeight }
+        if upscalerActive != stats.upscalerActive { upscalerActive = stats.upscalerActive }
         if gpuTime != stats.gpuTime { gpuTime = stats.gpuTime }
     }
 
     var snapshot: RenderStats {
         RenderStats(meshletCount: meshletCount, visibleMeshletCount: visibleMeshletCount, occludedMeshletCount: occludedMeshletCount,
                     triangleCount: triangleCount, drawnTriangleCount: drawnTriangleCount, lodLevelCount: lodLevelCount,
-                    vertexCount: vertexCount, materialCount: materialCount, textureCount: textureCount, gpuTime: gpuTime)
+                    vertexCount: vertexCount, materialCount: materialCount, textureCount: textureCount, gpuTime: gpuTime,
+                    renderWidth: renderWidth, renderHeight: renderHeight, outputWidth: outputWidth, outputHeight: outputHeight, upscalerActive: upscalerActive)
     }
 }
 
@@ -102,6 +113,10 @@ struct ModelViewerView: View {
                     ForEach([0.5, 1, 2, 4, 8] as [Float], id: \.self) { Text("\($0.formatted()) px").tag($0) }
                 }
                 .disabled(!settings.lodEnabled || stats.lodLevelCount <= 1)
+                Picker("렌더 해상도", selection: $settings.renderScale) {
+                    Text("100%").tag(Float(1)); Text("75% + MetalFX").tag(Float(0.75)); Text("67% + MetalFX").tag(Float(0.67)); Text("50% + MetalFX").tag(Float(0.5))
+                }
+                Picker("MSAA", selection: $settings.msaaSamples) { Text("MSAA 끔").tag(1); Text("MSAA 4x").tag(4) }
                 infoButton
             }
             #else
@@ -127,6 +142,13 @@ struct ModelViewerView: View {
                     }
                     .pickerStyle(.menu)
                     .disabled(!settings.lodEnabled || stats.lodLevelCount <= 1)
+                    Divider()
+                    Picker("렌더 해상도", selection: $settings.renderScale) {
+                        Text("100%").tag(Float(1)); Text("75% + MetalFX").tag(Float(0.75)); Text("67% + MetalFX").tag(Float(0.67)); Text("50% + MetalFX").tag(Float(0.5))
+                    }
+                    .pickerStyle(.menu)
+                    Picker("MSAA", selection: $settings.msaaSamples) { Text("끔").tag(1); Text("4x").tag(4) }
+                        .pickerStyle(.menu)
                 } label: {
                     Label("표시 옵션", systemImage: "slider.horizontal.3")
                 }
@@ -187,6 +209,9 @@ private struct StatsBar: View {
                  ? "\(stats.drawnTriangleCount.formatted()) / \(stats.triangleCount.formatted())"
                  : stats.triangleCount.formatted())
             item("GPU", String(format: "%.2f ms", stats.gpuTime * 1000))
+            if stats.upscalerActive {
+                item("MetalFX", "\(stats.renderWidth)×\(stats.renderHeight) → \(stats.outputWidth)×\(stats.outputHeight)")
+            }
         }
         .font(.caption.monospacedDigit())
         .padding(.horizontal, 12).padding(.vertical, 6)

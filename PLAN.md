@@ -170,7 +170,10 @@ xcodebuild -project MetalMesh.xcodeproj -scheme MetalMesh -destination 'platform
   LOD 토글/허용 오차 UI, 그린 삼각형 통계. bunny 7단계 310ms. 테스트 64개
   메모: 오차를 면적 가중 쿼드릭 제곱근으로 보고하면 값이 너무 작아 항상 최상위가 선택됨 → 누적 면적으로 정규화한 RMS 거리 사용.
   잠긴 정점은 붕괴로 삼각형이 0개가 되지 않도록 보호해야 구멍이 안 생김
-- [ ] MetalFX 업스케일링, MSAA
+- [x] **MetalFX 공간 업스케일링 + MSAA 4x** (2026-09-06): 렌더러를 내부 타깃(rgba16Float) → Hi-Z → 업스케일 → 프레젠트 구조로 재편.
+  MSAA 깊이는 max 리졸브해 Hi-Z 입력. 오클루전 2패스에서는 1패스 MS 컬러를 store, 2패스에서 resolve(1패스에서 resolve하면 2패스가 쓰레기를 로드).
+  MTKView는 깊이 없음. 테스트 65개
+- [ ] MetalFX 시간적 업스케일러 (모션 벡터 렌더 타깃 + 지터, 실기기 검증 필요)
 - [ ] 그림자(섀도 맵), SSAO
 - 메모: Hi-Z 밉 레벨은 `ceil(log2(사각형 px)) - 1`에서 3×3 샘플. 귀퉁이 4개만 읽으면 텍셀이 사각형의 2배까지 커져 배경 깊이를 포함해 컬링이 거의 안 됨
 

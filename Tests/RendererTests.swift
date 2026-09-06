@@ -39,20 +39,12 @@ struct RendererTests {
         let colorDesc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: Renderer.colorPixelFormat, width: size, height: size, mipmapped: false)
         colorDesc.usage = [.renderTarget, .shaderRead]
         colorDesc.storageMode = .shared
-        let depthDesc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: Renderer.depthPixelFormat, width: size, height: size, mipmapped: false)
-        depthDesc.usage = [.renderTarget, .shaderRead]
-        depthDesc.storageMode = .private
         let color = try #require(device.makeTexture(descriptor: colorDesc))
-        let depth = try #require(device.makeTexture(descriptor: depthDesc))
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = color
         pass.colorAttachments[0].loadAction = .clear
         pass.colorAttachments[0].storeAction = .store
         pass.colorAttachments[0].clearColor = Renderer.clearColor
-        pass.depthAttachment.texture = depth
-        pass.depthAttachment.loadAction = .clear
-        pass.depthAttachment.storeAction = .dontCare
-        pass.depthAttachment.clearDepth = 1
         return Target(color: color, pass: pass, size: size)
     }
 
@@ -339,6 +331,53 @@ struct RendererTests {
         #expect(farTris < lod0Tris / 4, "멀리서 \(farTris) vs 원본 \(lod0Tris)")
         #expect(farTris > 0)
         print("LOD render: lod0=\(lod0Tris) near=\(nearTris) far(8x)=\(farTris) levels=\(lodMesh.lodLevelCount)")
+    }
+
+    @Test func metalFXUpscaleAndMSAAProduceSimilarImages() async throws {
+        let device = try #require(self.device)
+        let samples = try #require(Bundle.main.url(forResource: "Samples", withExtension: nil))
+        let mesh = try await ModelLoader.load(url: samples.appendingPathComponent("stanford-bunny/stanford-bunny.obj"))
+        let renderer = try Renderer(device: device, mesh: MeshletBuilder.build(mesh))
+        renderer.camera.frame(center: mesh.boundsCenter, radius: mesh.boundsRadius)
+        let target = try makeTarget(device: device, size: 256)
+        func pixels() -> [UInt8] {
+            var px = [UInt8](repeating: 0, count: target.size * target.size * 4)
+            target.color.getBytes(&px, bytesPerRow: target.size * 4, from: MTLRegionMake2D(0, 0, target.size, target.size), mipmapLevel: 0)
+            return px
+        }
+        func meanAbsDiff(_ a: [UInt8], _ b: [UInt8]) -> Double {
+            var sum = 0
+            for i in stride(from: 0, to: a.count, by: 4) { sum += abs(Int(a[i]) - Int(b[i])) + abs(Int(a[i + 1]) - Int(b[i + 1])) + abs(Int(a[i + 2]) - Int(b[i + 2])) }
+            return Double(sum) / Double(a.count / 4 * 3)
+        }
+        renderer.renderFrame(passDescriptor: target.pass, drawable: nil, waitUntilCompleted: true)
+        let reference = pixels()
+        #expect(renderer.stats.renderWidth == 256 && renderer.stats.upscalerActive == false)
+
+        // MSAA 4x: 같은 장면, 가장자리만 부드러워진다
+        renderer.settings.msaaSamples = 4
+        renderer.renderFrame(passDescriptor: target.pass, drawable: nil, waitUntilCompleted: true)
+        let msaa = pixels()
+        #expect(meanAbsDiff(reference, msaa) < 6, "MSAA 차이 \(meanAbsDiff(reference, msaa))")
+        #expect(coverage(of: target) > 0.05)
+
+        // MetalFX 공간 업스케일 (50% → 100%)
+        renderer.settings.msaaSamples = 1
+        renderer.settings.renderScale = 0.5
+        renderer.renderFrame(passDescriptor: target.pass, drawable: nil, waitUntilCompleted: true)
+        let upscaled = pixels()
+        if Renderer.supportsMetalFX {
+            #expect(renderer.stats.upscalerActive)
+            #expect(renderer.stats.renderWidth == 128 && renderer.stats.outputWidth == 256)
+        }
+        #expect(meanAbsDiff(reference, upscaled) < 12, "업스케일 차이 \(meanAbsDiff(reference, upscaled))")
+        #expect(coverage(of: target) > 0.05)
+        print("METALFX msaaDiff=\(meanAbsDiff(reference, msaa)) upscaleDiff=\(meanAbsDiff(reference, upscaled)) supported=\(Renderer.supportsMetalFX)")
+
+        // 다시 100%: 참조와 동일해야 한다
+        renderer.settings.renderScale = 1
+        renderer.renderFrame(passDescriptor: target.pass, drawable: nil, waitUntilCompleted: true)
+        #expect(meanAbsDiff(reference, pixels()) < 0.5)
     }
 
     @Test func frustumPlanesContainCameraTarget() {

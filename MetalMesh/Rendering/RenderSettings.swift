@@ -29,6 +29,10 @@ struct RenderSettings: Equatable {
     var lodEnabled = true
     /// 허용 화면 오차 (픽셀)
     var lodThresholdPx: Float = 1.0
+    /// 내부 렌더 해상도 비율 (1 = 출력과 같음). 1 미만이면 MetalFX 공간 업스케일러가 출력 해상도로 키운다
+    var renderScale: Float = 1.0
+    /// MSAA 샘플 수 (1 또는 4)
+    var msaaSamples: Int = 1
 }
 
 /// 렌더러가 프레임마다 채우는 통계. 메인 스레드에서 갱신된다.
@@ -47,4 +51,9 @@ struct RenderStats: Equatable {
     var textureCount = 0
     /// 초 단위 GPU 시간
     var gpuTime: Double = 0
+    var renderWidth = 0
+    var renderHeight = 0
+    var outputWidth = 0
+    var outputHeight = 0
+    var upscalerActive = false
 }

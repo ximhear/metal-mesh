@@ -25,6 +25,8 @@ mesh 스테이지가 살아남은 메시렛만 삼각형으로 펼칩니다.
 - **메시렛 컬링 3단**: 프러스텀(경계 구) → 노멀 콘(뒷면) → 2패스 Hi-Z 오클루전. 하단 통계 바에 그린/전체/가림 수와 GPU 시간 표시
 - **클러스터 LOD (Nanite식)**: 메시렛 그룹을 경계를 잠근 채 쿼드릭 단순화해 계층을 만들고, object 스테이지가 화면 오차 기준으로
   크랙 없는 컷을 고른다. 허용 오차(0.5~8px) 선택, 그린 삼각형 / 원본 삼각형 표시
+- **MetalFX 공간 업스케일링 + MSAA**: 내부 rgba16Float 타깃에 50~75%로 렌더한 뒤 `MTLFXSpatialScaler`로 출력 해상도로 키우고,
+  MSAA 4x는 컬러·깊이(max 리졸브 → Hi-Z)에 적용. 프레젠트 패스가 드로어블에 복사
 - **PBR(metallic-roughness) + IBL**: baseColor·노멀·러프니스·메탈릭 맵을 OBJ(.mtl), USDC, USDZ(내장), glTF 재질에서 추출.
   HDRI(Poly Haven CC0)로 조도 큐브맵·GGX 프리필터 스펙큘러·BRDF LUT를 시작 시 컴퓨트로 생성해 Cook-Torrance 셰이딩, ACES 톤매핑.
   서브메시별 재질을 메시렛 단위로 유지하고 Metal 3 인자 버퍼(`MTLResourceID`)로 프래그먼트에서 직접 샘플링
@@ -78,6 +80,17 @@ Stanford Bunny: 7단계, 69,451 → 34,530 → 17,110 → 9,146 → 4,871 → 1,
 |---|---|---|
 | ![LOD0](docs/images/bunny-lod0-wire.png) | ![LOD](docs/images/bunny-lod-wire.png) | ![LOD meshlets](docs/images/bunny-lod-meshlets.png) |
 
+### 프레임 구조 (내부 타깃 → 업스케일 → 프레젠트)
+
+```
+[렌더 해상도 = 출력 × renderScale, rgba16Float, 선택적 MSAA 4x]
+  1패스 → 깊이 리졸브(max) → Hi-Z → 2패스 → (MSAA면 리졸브)
+  → renderScale < 1 이면 MTLFXSpatialScaler (colorProcessingMode .linear) → 출력 해상도
+  → 프레젠트 패스(풀스크린 삼각형)로 드로어블/스냅샷 대상(bgra8Unorm_srgb)에 복사
+```
+
+시간적(temporal) 업스케일러는 모션 벡터·지터 규약을 기기에서 눈으로 검증해야 해서 아직 넣지 않았습니다.
+
 ### 2패스 Hi-Z 오클루전 컬링
 
 ```
@@ -120,7 +133,7 @@ open MetalMesh.xcodeproj
 명령줄:
 
 ```bash
-# macOS 빌드 + 테스트 (64개)
+# macOS 빌드 + 테스트 (65개)
 xcodebuild -project MetalMesh.xcodeproj -scheme MetalMesh -destination 'platform=macOS' \
   -derivedDataPath build/DerivedData test
 
@@ -156,11 +169,11 @@ MeshCore/                       메시 처리 프레임워크 (Debug에서도 -O
 MetalMesh/
   App/                          진입점, 기기 지원 검사, 미지원 안내
   Library/                      ModelEntry, ModelLibrary(JSON 인덱스 + Documents/Models), ThumbnailStore, 리스트 화면
-  Rendering/                    Renderer(2패스 오클루전, Hi-Z 빌드), GPUMesh(PBR 텍스처), IBLEnvironment(HDRI→IBL 사전계산), Snapshot, Shaders/(MeshShaders, HiZ, IBL)
+  Rendering/                    Renderer(내부 타깃, 2패스 오클루전, Hi-Z, MSAA, MetalFX, 프레젠트), GPUMesh(PBR 텍스처), IBLEnvironment, Snapshot, Shaders/(MeshShaders, HiZ, IBL, Present)
   Resources/Environment/        HDRI (Poly Haven studio_small_09, CC0)
   Viewer/                       ModelViewerView, MetalView(제스처), OrbitCamera
   Resources/Samples/            번들 샘플 모델 + 폴더별 LICENSE.txt + MODELS.md
-Tests/                          Swift Testing 64개 (레이아웃, 라이브러리, 썸네일, 로더·재질, glTF, 메시렛, 오프스크린 렌더)
+Tests/                          Swift Testing 65개 (레이아웃, 라이브러리, 썸네일, 로더·재질, glTF, 메시렛, 오프스크린 렌더)
 scripts/probe-model.swift       Model I/O 로드 검증 CLI
 scripts/bench-meshlets.swift    메시렛 빌더 벤치마크 (-O CLI)
 .claude/skills/fetch-3d-model/  무료 소스(Poly Haven, Sketchfab, Poly Pizza, GitHub 테스트 메시)에서 모델을 받는 절차
@@ -191,7 +204,8 @@ PLAN.md                         단계별 계획과 진행 상태
 - [x] 2패스 Hi-Z 오클루전 컬링
 - [x] PBR + IBL, 노멀 매핑
 - [x] 클러스터 LOD (Nanite식)
-- [ ] MetalFX 업스케일링, MSAA
+- [x] MetalFX 공간 업스케일링, MSAA 4x
+- [ ] MetalFX 시간적 업스케일링 (모션 벡터·지터)
 - [ ] 그림자, SSAO
 - [ ] iPhone/iPad 실기기 성능 측정
 

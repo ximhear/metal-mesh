@@ -116,6 +116,18 @@ public enum MeshSimplifier {
                 }
                 if aliveCount - dying < 1 { protectedVertexStarves = true; break }
             }
+            // 잠긴 to 정점: 붕괴 후 남는 삼각형 = (기존 − 공유) + (from에서 넘어오는 비공유 삼각형). 0이면 거부
+            if !protectedVertexStarves && isLocked[Int(to)] {
+                var aliveTo = 0
+                for tIdx in vertexTris[Int(to)] where alive[Int(tIdx)] { aliveTo += 1 }
+                var incoming = 0
+                for tIdx in vertexTris[Int(from)] where alive[Int(tIdx)] {
+                    let t = Int(tIdx)
+                    let vs = [find(tris[t * 3]), find(tris[t * 3 + 1]), find(tris[t * 3 + 2])]
+                    if !vs.contains(to) { incoming += 1 }
+                }
+                if aliveTo - sharedTriangles + incoming < 1 { protectedVertexStarves = true }
+            }
             if protectedVertexStarves { continue }
 
             // 뒤집힘 검사: from을 to로 옮겼을 때 살아남는 삼각형의 노멀이 반전되면 거부
