@@ -28,7 +28,7 @@ mesh 스테이지가 살아남은 메시렛만 삼각형으로 펼칩니다.
   크랙 없는 컷을 고른다. 허용 오차(0.5~8px) 선택, 그린 삼각형 / 원본 삼각형 표시
 - **MetalFX 공간 업스케일링 + MSAA**: 내부 rgba16Float 타깃에 50~75%로 렌더한 뒤 `MTLFXSpatialScaler`로 출력 해상도로 키우고,
   MSAA 4x는 컬러·깊이(max 리졸브 → Hi-Z)에 적용. 프레젠트 패스가 드로어블에 복사
-- **그림자 + SSAO + 바닥**: 태양 방향광의 2048² 섀도 맵(같은 메시 셰이더 파이프라인을 깊이 전용으로, 같은 LOD 컷, PCF 3×3),
+- **그림자 + SSAO + 바닥(기본 꺼짐)**: 태양 방향광의 2048² 섀도 맵(같은 메시 셰이더 파이프라인을 깊이 전용으로, 같은 LOD 컷, PCF 3×3),
   그림자를 받는 바닥 원판, 깊이 기반 SSAO(16 샘플 반구 + 블러)를 프레젠트에서 합성
 - **PBR(metallic-roughness) + IBL**: baseColor·노멀·러프니스·메탈릭 맵을 OBJ(.mtl), USDC, USDZ(내장), glTF 재질에서 추출.
   HDRI(Poly Haven CC0)로 조도 큐브맵·GGX 프리필터 스펙큘러·BRDF LUT를 시작 시 컴퓨트로 생성해 Cook-Torrance 셰이딩, ACES 톤매핑.

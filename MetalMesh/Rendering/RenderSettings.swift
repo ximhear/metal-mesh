@@ -36,7 +36,7 @@ struct RenderSettings: Equatable {
     /// 태양 방향광 섀도 맵
     var shadowsEnabled = true
     /// 그림자를 받는 바닥 평면
-    var groundEnabled = true
+    var groundEnabled = false
     /// 화면 공간 앰비언트 오클루전
     var ssaoEnabled = true
 }
