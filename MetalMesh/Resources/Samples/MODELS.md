@@ -30,3 +30,13 @@
 | Duck | Khronos glTF-Sample-Assets (Sony, 2006) | SCEA Shared Source License 1.0 | glb (팔레트 PNG 텍스처) | 4,212 |
 | Avocado | Khronos glTF-Sample-Assets (Microsoft) | CC0 1.0 | glb (내장 PBR 텍스처) | 682 |
 | Bunny (low poly) | https://poly.pizza/m/irZjWFARyl (Quaternius) | CC0 1.0 | glb | 8,284 |
+| Toy Car | Khronos glTF-Sample-Assets | CC0 1.0 | glb (PBR) | 108,936 |
+| Lantern | Khronos glTF-Sample-Assets | CC0 1.0 | glb (PBR) | 5,394 |
+| Water Bottle | Khronos glTF-Sample-Assets | CC0 1.0 | glb (PBR) | 4,510 |
+| Brass Goblets | https://polyhaven.com/a/brass_goblets | CC0 1.0 | usdc + 1k 텍스처 (재질 3개) | 9,600 |
+| Rocking Chair 01 | https://polyhaven.com/a/Rockingchair_01 | CC0 1.0 | usdc + 1k 텍스처 | 11,866 |
+| Antique Katana 01 | https://polyhaven.com/a/antique_katana_01 | CC0 1.0 | usdc + 1k 텍스처 | 6,670 |
+| Pliosaur | https://sketchfab.com/3d-models/d90f30fd8ae9488ba8186a4572c9cf4f (Spinnee) | CC BY 4.0 — 작성자 표기 의무 | usdz | 13,182 |
+| GameBoy | https://sketchfab.com/3d-models/d1f396eae44141058ec945234af36b16 (NoMoreFeelings) | CC BY 4.0 — 작성자 표기 의무 | usdz | 6,938 |
+| Cartoon Robot Dog | https://sketchfab.com/3d-models/745c8026934a450fb4c8c99568463860 (3DWorkbench) | CC BY 4.0 — 작성자 표기 의무 | usdz | 17,306 |
+| Cleopatra Bust | https://sketchfab.com/3d-models/701c2c9fa574492fad0d6b6b2348e740 (yugengen) | CC BY 4.0 — 작성자 표기 의무 | usdz | 33,668 |

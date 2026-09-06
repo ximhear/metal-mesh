@@ -49,6 +49,11 @@ struct SnapshotTests {
         Shot(file: "stanford-bunny/stanford-bunny.obj", name: "bunny-shadows", mode: .shaded, yaw: 0.8, pitch: 0.45, extras: true),
         Shot(file: "lion-noe3d/lion-noe3d.usdz", name: "lion-shadows", mode: .shaded, yaw: 2.4, pitch: 0.35, extras: true),
         Shot(file: "Ukulele_01/Ukulele_01_1k.usdc", name: "ukulele-shadows", mode: .shaded, yaw: 0.3, pitch: 0.7, extras: true),
+        // 새 PBR 샘플
+        Shot(file: "brass_goblets/brass_goblets_1k.usdc", name: "brass-goblets", mode: .shaded, yaw: 0.5, pitch: 0.3, extras: true),
+        Shot(file: "Lantern/Lantern.glb", name: "lantern-glb", mode: .shaded, yaw: 0.6, pitch: 0.25, extras: true),
+        Shot(file: "ToyCar/ToyCar.glb", name: "toycar-glb", mode: .shaded, yaw: 0.9, pitch: 0.35, extras: true),
+        Shot(file: "robot-dog/robot-dog.usdz", name: "robot-dog", mode: .shaded, yaw: 0.6, pitch: 0.3, extras: true),
     ]
 
     @Test func snapshotProducesImage() throws {

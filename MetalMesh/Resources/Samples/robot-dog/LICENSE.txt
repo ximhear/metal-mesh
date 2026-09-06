@@ -1,0 +1,5 @@
+Cartoon Robot Dog
+Author: 3DWorkbench (Sketchfab) — 표기 의무
+Source: https://sketchfab.com/3d-models/745c8026934a450fb4c8c99568463860
+License: CC Attribution 4.0
+Format: usdz (Sketchfab 변환본)

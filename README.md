@@ -15,6 +15,7 @@ mesh 스테이지가 살아남은 메시렛만 삼각형으로 펼칩니다.
 | ![Camera textured](docs/images/camera-textured.png) baseColor 텍스처 (Poly Haven Camera 01, CC0) | ![Egyptian cat textured](docs/images/cat-textured.png) USDZ 내장 텍스처 (Egyptian Cat Statue by Ankledot, CC BY) |
 | ![Duck glb](docs/images/duck-glb.png) GLB (Khronos Duck) | ![Avocado glb](docs/images/avocado-glb.png) GLB PBR 재질 + IBL (Khronos Avocado, CC0) |
 | ![Bunny shadows](docs/images/bunny-shadows.png) 섀도 맵 + SSAO + 바닥 | ![Lion shadows](docs/images/lion-shadows.png) 사자 석상, 그림자와 접촉 AO |
+| ![Brass goblets](docs/images/brass-goblets.png) 금속 PBR (Poly Haven Brass Goblets, CC0) | ![Toy car](docs/images/toycar-glb.png) glTF PBR (Khronos ToyCar, CC0) |
 
 이미지는 앱의 렌더러로 오프스크린 렌더링한 결과입니다 (`Tests/SnapshotTests.swift`).
 
@@ -217,8 +218,9 @@ PLAN.md                         단계별 계획과 진행 상태
 
 ## 샘플 모델 라이선스
 
-번들 모델 28개의 출처와 라이선스는 [`MetalMesh/Resources/Samples/MODELS.md`](MetalMesh/Resources/Samples/MODELS.md)와 각 폴더의 `LICENSE.txt`에 있습니다.
-Stanford 스캔 모델은 비상업·출처 표기 조건, Sketchfab의 CC BY 모델(Laocoön by rigsters, Egyptian Cat by Ankledot, Skull by martinjario)은 작성자 표기 조건입니다.
+번들 모델 38개의 출처와 라이선스는 [`MetalMesh/Resources/Samples/MODELS.md`](MetalMesh/Resources/Samples/MODELS.md)와 각 폴더의 `LICENSE.txt`에 있습니다.
+Stanford 스캔 모델은 비상업·출처 표기 조건, Sketchfab의 CC BY 모델(Laocoön by rigsters, Egyptian Cat by Ankledot, Skull by martinjario,
+Pliosaur by Spinnee, GameBoy by NoMoreFeelings, Cartoon Robot Dog by 3DWorkbench, Cleopatra Bust by yugengen)은 작성자 표기 조건입니다.
 Poly Haven 모델과 Sketchfab CC0 모델은 CC0입니다.
 
 ## 라이선스

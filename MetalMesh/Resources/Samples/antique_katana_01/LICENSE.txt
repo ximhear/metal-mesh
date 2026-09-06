@@ -1,0 +1,4 @@
+antique_katana_01
+Source: https://polyhaven.com/a/antique_katana_01
+License: CC0 1.0 (Poly Haven)
+Files: antique_katana_01_1k.usdc + textures/ (1k, 노멀은 PNG)

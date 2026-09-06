@@ -1,0 +1,4 @@
+brass_goblets
+Source: https://polyhaven.com/a/brass_goblets
+License: CC0 1.0 (Poly Haven)
+Files: brass_goblets_1k.usdc + textures/ (1k, 노멀은 PNG)

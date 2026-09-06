@@ -1,0 +1,5 @@
+Pliosaur
+Author: Spinnee (Sketchfab) — 표기 의무
+Source: https://sketchfab.com/3d-models/d90f30fd8ae9488ba8186a4572c9cf4f
+License: CC Attribution 4.0
+Format: usdz (Sketchfab 변환본)

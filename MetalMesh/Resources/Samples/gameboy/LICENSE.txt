@@ -1,0 +1,5 @@
+GameBoy
+Author: NoMoreFeelings (Sketchfab) — 표기 의무
+Source: https://sketchfab.com/3d-models/d1f396eae44141058ec945234af36b16
+License: CC Attribution 4.0
+Format: usdz (Sketchfab 변환본)
