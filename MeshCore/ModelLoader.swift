@@ -88,18 +88,24 @@ public enum ModelLoaderError: LocalizedError {
     }
 }
 
-/// Model I/O로 파일을 읽어 `Vertex` 레이아웃(position/normal/uv, stride 48)으로 정규화한다.
+/// Model I/O로 파일을 읽어 `Vertex` 레이아웃(position/normal/uv/tangent, stride 64)으로 정규화한다.
 /// 노드 변환을 정점에 적용하고, 노멀이 없으면 생성한다. 폴리곤은 삼각형으로 분할된다.
 public enum ModelLoader {
     /// Model I/O가 읽는 포맷 + 자체 glTF 로더 포맷
     public static let supportedExtensions: Set<String> = Set(["obj", "ply", "stl", "usd", "usda", "usdc", "usdz"]).union(GLBLoader.supportedExtensions)
 
     public static func load(url: URL) async throws -> MeshData {
+        try Task.checkCancellation()
         if GLBLoader.canLoad(url) {
             // Model I/O를 쓰지 않으므로 직렬 큐가 필요 없다
-            return try await Task.detached(priority: .userInitiated) { try GLBLoader.load(url: url) }.value
+            return try await BackgroundWork.run { try GLBLoader.load(url: url) }
         }
-        return try await ModelIOQueue.shared.run { try loadSynchronously(url: url) }
+        let mesh = try await ModelIOQueue.shared.run {
+            try Task.checkCancellation()
+            return try loadSynchronously(url: url)
+        }
+        try Task.checkCancellation()
+        return mesh
     }
 
     /// 테스트나 직렬 컨텍스트에서 직접 호출할 때 사용. 일반 코드는 `load(url:)`.

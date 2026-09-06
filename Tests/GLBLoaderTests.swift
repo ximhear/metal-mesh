@@ -11,7 +11,7 @@ struct GLBLoaderTests {
     }
 
     /// 최소 .gltf(JSON + data: URI 버퍼) 작성: 삼각형 2개짜리 사각형, 노멀 없음, ushort 인덱스
-    private func writeQuadGLTF(strip: Bool = false) throws -> URL {
+    private func writeQuadGLTF(strip: Bool = false, edit: ((inout [String: Any]) throws -> Void)? = nil) throws -> URL {
         var bin = Data()
         let positions: [Float] = [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]
         positions.withUnsafeBytes { bin.append(contentsOf: $0) }
@@ -31,8 +31,137 @@ struct GLBLoaderTests {
          "buffers":[{"byteLength":\(bin.count),"uri":"data:application/octet-stream;base64,\(bin.base64EncodedString())"}]}
         """
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("quad-\(UUID().uuidString).gltf")
-        try json.write(to: url, atomically: true, encoding: .utf8)
+        var document = try #require(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        try edit?(&document)
+        try JSONSerialization.data(withJSONObject: document).write(to: url)
         return url
+    }
+
+    private func expectRejected(_ edit: @escaping (inout [String: Any]) throws -> Void) throws {
+        let url = try writeQuadGLTF(edit: edit)
+        defer { try? FileManager.default.removeItem(at: url) }
+        #expect(throws: GLBLoaderError.self) { try GLBLoader.load(url: url) }
+    }
+
+    @Test(arguments: [-1, Int.max])
+    func rejectsInvalidReferences(index: Int) throws {
+        try expectRejected { $0["scene"] = index }
+        try expectRejected { $0["scenes"] = [["nodes": [index]]] }
+        try expectRejected { $0["nodes"] = [["mesh": index]] }
+        try expectRejected { $0["nodes"] = [["children": [index]]] }
+        try expectRejected {
+            $0["meshes"] = [["primitives": [["attributes": ["POSITION": index]]]]]
+        }
+        try expectRejected {
+            $0["materials"] = [["pbrMetallicRoughness": ["baseColorTexture": ["index": index]]]]
+        }
+        try expectRejected {
+            $0["textures"] = [["source": index]]
+        }
+        try expectRejected {
+            $0["images"] = [["bufferView": index]]
+        }
+        try expectRejected {
+            var views = try #require($0["bufferViews"] as? [[String: Any]])
+            views[0]["buffer"] = index
+            $0["bufferViews"] = views
+        }
+        try expectRejected {
+            var accessors = try #require($0["accessors"] as? [[String: Any]])
+            accessors[0]["bufferView"] = index
+            $0["accessors"] = accessors
+        }
+    }
+
+    @Test(arguments: ["count", "byteOffset"])
+    func rejectsInvalidAccessorRanges(field: String) throws {
+        for accessorIndex in [0, 2] {
+            for value in [-1, Int.max] {
+                try expectRejected {
+                    var accessors = try #require($0["accessors"] as? [[String: Any]])
+                    accessors[accessorIndex][field] = value
+                    $0["accessors"] = accessors
+                }
+            }
+        }
+    }
+
+    @Test(arguments: ["byteLength", "byteOffset", "byteStride"])
+    func rejectsInvalidBufferViewRanges(field: String) throws {
+        for value in [-1, Int.max] {
+            try expectRejected {
+                var views = try #require($0["bufferViews"] as? [[String: Any]])
+                views[0][field] = value
+                $0["bufferViews"] = views
+            }
+        }
+        if field == "byteStride" {
+            try expectRejected {
+                var views = try #require($0["bufferViews"] as? [[String: Any]])
+                views[0][field] = 4
+                $0["bufferViews"] = views
+            }
+        }
+    }
+
+    @Test(arguments: [5120, 5122, 5126])
+    func rejectsInvalidIndexComponentTypes(componentType: Int) throws {
+        try expectRejected {
+            var accessors = try #require($0["accessors"] as? [[String: Any]])
+            accessors[2]["componentType"] = componentType
+            $0["accessors"] = accessors
+        }
+    }
+
+    @Test func rejectsInvalidTrianglesWithoutRegroupingIndices() throws {
+        try expectRejected {
+            var buffers = try #require($0["buffers"] as? [[String: Any]])
+            let uri = try #require(buffers[0]["uri"] as? String)
+            let payload = try #require(uri.split(separator: ",").last)
+            var data = try #require(Data(base64Encoded: String(payload)))
+            data[80] = 99
+            buffers[0]["uri"] = "data:application/octet-stream;base64," + data.base64EncodedString()
+            $0["buffers"] = buffers
+        }
+        try expectRejected {
+            var accessors = try #require($0["accessors"] as? [[String: Any]])
+            accessors[2]["count"] = 5
+            $0["accessors"] = accessors
+        }
+    }
+
+    @Test func rejectsNodeCyclesAndShortDeclaredBuffers() throws {
+        try expectRejected { $0["nodes"] = [["mesh": 0, "children": [0]]] }
+        try expectRejected { $0["nodes"] = [["children": [1, 1]], ["mesh": 0]] }
+        try expectRejected { $0["nodes"] = [["mesh": 0, "translation": [0, 1]]] }
+        try expectRejected {
+            var buffers = try #require($0["buffers"] as? [[String: Any]])
+            buffers[0]["byteLength"] = 4
+            $0["buffers"] = buffers
+        }
+    }
+
+    @Test func rejectsNonFiniteVertexAttributes() throws {
+        try expectRejected {
+            var buffers = try #require($0["buffers"] as? [[String: Any]])
+            let uri = try #require(buffers[0]["uri"] as? String)
+            let payload = try #require(uri.split(separator: ",").last)
+            var data = try #require(Data(base64Encoded: String(payload)))
+            var value = Float.nan
+            withUnsafeBytes(of: &value) { data.replaceSubrange(0..<4, with: $0) }
+            buffers[0]["uri"] = "data:application/octet-stream;base64," + data.base64EncodedString()
+            $0["buffers"] = buffers
+        }
+    }
+
+    @Test func rejectsMismatchedGLBLength() throws {
+        let source = try sampleURL("Duck/Duck.glb")
+        var data = try Data(contentsOf: source)
+        data.append(0)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("bad-length-\(UUID()).glb")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try data.write(to: url)
+        #expect(throws: GLBLoaderError.self) { try GLBLoader.load(url: url) }
     }
 
     @Test func parsesMinimalGLTFWithTransformsAndGeneratedNormals() throws {

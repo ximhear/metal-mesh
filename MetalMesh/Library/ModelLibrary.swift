@@ -16,7 +16,7 @@ final class ModelLibrary {
             case .unsupportedFormat(let ext):
                 return "지원하지 않는 형식입니다: .\(ext)\n지원: \(ModelProbe.supportedExtensions.sorted().joined(separator: ", "))"
             case .copyFailed(let reason):
-                return "파일을 복사하지 못했습니다: \(reason)"
+                return "파일을 가져오지 못했습니다: \(reason)"
             }
         }
     }
@@ -61,7 +61,9 @@ final class ModelLibrary {
         case .bundled(let path):
             return samplesDirectory?.appendingPathComponent(path)
         case .imported(let path):
-            return modelsDirectory.appendingPathComponent(path)
+            let url = modelsDirectory.appendingPathComponent(path).standardizedFileURL
+            guard url.path.hasPrefix(modelsDirectory.standardizedFileURL.path + "/") else { return nil }
+            return url
         }
     }
 
@@ -146,47 +148,63 @@ final class ModelLibrary {
             throw LibraryError.unsupportedFormat(ext)
         }
 
+        return try await importSource(from: sourceURL, isDirectory: false)[0]
+    }
+
+    @discardableResult
+    func importFolder(from sourceURL: URL) async throws -> [ModelEntry] {
+        try await importSource(from: sourceURL, isDirectory: true)
+    }
+
+    private func importSource(from sourceURL: URL, isDirectory: Bool) async throws -> [ModelEntry] {
         let accessing = sourceURL.startAccessingSecurityScopedResource()
         defer { if accessing { sourceURL.stopAccessingSecurityScopedResource() } }
 
-        let id = UUID()
-        let folder = modelsDirectory.appendingPathComponent(id.uuidString, isDirectory: true)
-        let destination = folder.appendingPathComponent(sourceURL.lastPathComponent)
+        let group = UUID().uuidString
+        let folder = modelsDirectory.appendingPathComponent(group, isDirectory: true)
+        var imported: [ModelEntry]
         do {
-            try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
-            try fileManager.copyItem(at: sourceURL, to: destination)
+            let actualDirectory = try sourceURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true
+            guard actualDirectory == isDirectory else { throw ModelImport.ImportError.resource(sourceURL.lastPathComponent) }
+            let paths = try await BackgroundWork.run {
+                try ModelImport.copy(from: sourceURL, to: folder)
+            }
+            try Task.checkCancellation()
+            imported = try paths.map { path in
+                let destination = folder.appendingPathComponent(path)
+                let size = try destination.resourceValues(forKeys: [.fileSizeKey]).fileSize.map(Int64.init) ?? 0
+                let license = try? String(contentsOf: destination.deletingLastPathComponent().appendingPathComponent("LICENSE.txt"), encoding: .utf8)
+                return ModelEntry(id: UUID(), name: destination.deletingPathExtension().lastPathComponent,
+                                  source: .imported(relativePath: "\(group)/\(path)"), addedAt: Date(), fileSize: size, licenseText: license)
+            }
         } catch {
             try? fileManager.removeItem(at: folder)
+            if error is CancellationError { throw error }
             throw LibraryError.copyFailed(error.localizedDescription)
         }
-
-        let size = (try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
-        var entry = ModelEntry(
-            id: id,
-            name: sourceURL.deletingPathExtension().lastPathComponent,
-            source: .imported(relativePath: "\(id.uuidString)/\(sourceURL.lastPathComponent)"),
-            addedAt: Date(),
-            fileSize: size
-        )
-        entries.insert(entry, at: 0)
+        entries.insert(contentsOf: imported, at: 0)
         save()
 
-        if let stats = await ModelProbe.stats(for: destination) {
-            entry.vertexCount = stats.vertexCount
-            entry.triangleCount = stats.triangleCount
-            update(entry)
+        for index in imported.indices {
+            guard !Task.isCancelled, let destination = fileURL(for: imported[index]),
+                  let stats = await ModelProbe.stats(for: destination) else { continue }
+            imported[index].vertexCount = stats.vertexCount
+            imported[index].triangleCount = stats.triangleCount
+            update(imported[index])
         }
-        return entry
+        return imported
     }
 
     func delete(_ entry: ModelEntry) {
         guard case .imported = entry.source else { return }
-        if let url = fileURL(for: entry) {
-            try? fileManager.removeItem(at: url.deletingLastPathComponent())
+        entries.removeAll { $0.id == entry.id }
+        let group = entry.source.relativePath.split(separator: "/").first.map(String.init)
+        if let group, UUID(uuidString: group) != nil,
+           !entries.contains(where: { !$0.isBundled && $0.source.relativePath.hasPrefix(group + "/") }) {
+            try? fileManager.removeItem(at: modelsDirectory.appendingPathComponent(group, isDirectory: true))
         }
         try? fileManager.removeItem(at: thumbnailsDirectory.appendingPathComponent("\(entry.id.uuidString).png"))
         try? fileManager.removeItem(at: rootDirectory.appendingPathComponent("Thumbnails/\(entry.id.uuidString).png"))
-        entries.removeAll { $0.id == entry.id }
         save()
     }
 

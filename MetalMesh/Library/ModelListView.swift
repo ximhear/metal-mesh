@@ -1,9 +1,11 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ModelListView: View {
     @Environment(ModelLibrary.self) private var library
     @Environment(ThumbnailStore.self) private var thumbnails
     @State private var showImporter = false
+    @State private var importDirectory = false
     @State private var pendingImports = 0
     @State private var errorMessage: String?
 
@@ -22,7 +24,7 @@ struct ModelListView: View {
                 ContentUnavailableView(
                     "모델이 없습니다",
                     systemImage: "cube.transparent",
-                    description: Text("+ 버튼으로 파일을 추가하거나 여기로 끌어다 놓으세요.")
+                    description: Text("+ 버튼으로 모델 파일이나 관련 파일이 들어 있는 폴더를 추가하세요.")
                 )
             }
         }
@@ -36,8 +38,15 @@ struct ModelListView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button {
-                    showImporter = true
+                Menu {
+                    Button("모델 파일 가져오기", systemImage: "doc.badge.plus") {
+                        importDirectory = false
+                        showImporter = true
+                    }
+                    Button("모델·텍스처 폴더 가져오기", systemImage: "folder.badge.plus") {
+                        importDirectory = true
+                        showImporter = true
+                    }
                 } label: {
                     Label("추가", systemImage: "plus")
                 }
@@ -51,7 +60,7 @@ struct ModelListView: View {
         }
         .fileImporter(
             isPresented: $showImporter,
-            allowedContentTypes: ModelLibrary.contentTypes,
+            allowedContentTypes: importDirectory ? [.folder] : ModelLibrary.contentTypes,
             allowsMultipleSelection: true
         ) { result in
             switch result {
@@ -95,7 +104,13 @@ struct ModelListView: View {
             var failures: [String] = []
             for url in urls {
                 do {
-                    try await library.importFile(from: url)
+                    let accessing = url.startAccessingSecurityScopedResource()
+                    defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+                    if try url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true {
+                        try await library.importFolder(from: url)
+                    } else {
+                        try await library.importFile(from: url)
+                    }
                 } catch {
                     failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
                 }

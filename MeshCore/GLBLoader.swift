@@ -28,9 +28,11 @@ public enum GLBLoader {
     }
 
     public static func load(url: URL) throws -> MeshData {
+        try Task.checkCancellation()
         let fileData = try Data(contentsOf: url)
         let (jsonData, binChunk) = try splitContainer(fileData, isBinary: url.pathExtension.lowercased() == "glb")
         let gltf = try JSONDecoder().decode(GLTF.self, from: jsonData)
+        try validate(gltf)
 
         if let required = gltf.extensionsRequired {
             let unsupported = required.filter { $0 != "KHR_materials_emissive_strength" && $0 != "KHR_mesh_quantization" }
@@ -44,7 +46,7 @@ public enum GLBLoader {
 
         let roots: [Int]
         if let scenes = gltf.scenes, !scenes.isEmpty {
-            roots = scenes[min(gltf.scene ?? 0, scenes.count - 1)].nodes ?? []
+            roots = scenes[gltf.scene ?? 0].nodes ?? []
         } else {
             // 씬이 없으면 부모가 없는 노드 전부
             let all = gltf.nodes ?? []
@@ -74,7 +76,8 @@ public enum GLBLoader {
         }
         guard u32(0) == 0x4654_6C67 else { throw GLBLoaderError.invalidContainer("magic 'glTF' 아님") }
         guard u32(4) == 2 else { throw GLBLoaderError.unsupported("glTF 버전 \(u32(4))") }
-        let total = min(Int(u32(8)), data.count)
+        let total = Int(u32(8))
+        guard total == data.count else { throw GLBLoaderError.invalidContainer("파일 길이 불일치") }
         var offset = 12
         var json: Data?
         var bin: Data?
@@ -82,18 +85,87 @@ public enum GLBLoader {
             let length = Int(u32(offset))
             let type = u32(offset + 4)
             let start = offset + 8
-            guard start + length <= total else { throw GLBLoaderError.invalidContainer("청크 길이 초과") }
+            guard length % 4 == 0, length <= total - start else { throw GLBLoaderError.invalidContainer("청크 길이 초과 또는 정렬 오류") }
             let chunk = data.subdata(in: start..<start + length)
-            if type == 0x4E4F_534A { json = chunk }           // 'JSON'
-            else if type == 0x004E_4942 { bin = chunk }       // 'BIN\0'
+            if type == 0x4E4F_534A {
+                guard json == nil, offset == 12 else { throw GLBLoaderError.invalidContainer("JSON 청크 순서 또는 중복") }
+                json = chunk
+            } else if type == 0x004E_4942 {
+                guard json != nil, bin == nil else { throw GLBLoaderError.invalidContainer("BIN 청크 순서 또는 중복") }
+                bin = chunk
+            }
             offset = start + length
-            offset += (4 - offset % 4) % 4
         }
+        guard offset == total else { throw GLBLoaderError.invalidContainer("불완전한 청크 헤더") }
         guard let json else { throw GLBLoaderError.invalidContainer("JSON 청크 없음") }
         return (json, bin)
     }
 
     // MARK: - 순회
+
+    public static func externalResourceURIs(url: URL) throws -> [String] {
+        let (json, _) = try splitContainer(Data(contentsOf: url), isBinary: url.pathExtension.lowercased() == "glb")
+        let gltf = try JSONDecoder().decode(GLTF.self, from: json)
+        try validate(gltf)
+        return ((gltf.buffers ?? []).compactMap(\.uri) + (gltf.images ?? []).compactMap(\.uri))
+            .filter { !$0.hasPrefix("data:") }
+    }
+
+    private static func validate(_ gltf: GLTF) throws {
+        func reference(_ index: Int, count: Int, name: String) throws {
+            guard (0..<count).contains(index) else { throw GLBLoaderError.invalidContainer("\(name) 인덱스 \(index)") }
+        }
+        let nodes = gltf.nodes ?? []
+        var children = Set<Int>()
+        if let scene = gltf.scene { try reference(scene, count: gltf.scenes?.count ?? 0, name: "scene") }
+        for scene in gltf.scenes ?? [] {
+            for node in scene.nodes ?? [] { try reference(node, count: nodes.count, name: "node") }
+        }
+        for node in nodes {
+            if let mesh = node.mesh { try reference(mesh, count: gltf.meshes?.count ?? 0, name: "mesh") }
+            for child in node.children ?? [] {
+                try reference(child, count: nodes.count, name: "child")
+                guard children.insert(child).inserted else { throw GLBLoaderError.invalidContainer("노드의 부모 중복") }
+            }
+            for (values, count) in [(node.matrix, 16), (node.translation, 3), (node.rotation, 4), (node.scale, 3)] {
+                if let values, values.count != count || !values.allSatisfy(\.isFinite) {
+                    throw GLBLoaderError.invalidContainer("노드 변환")
+                }
+            }
+        }
+        for mesh in gltf.meshes ?? [] {
+            for primitive in mesh.primitives {
+                for accessor in primitive.attributes.values { try reference(accessor, count: gltf.accessors?.count ?? 0, name: "accessor") }
+                if let accessor = primitive.indices { try reference(accessor, count: gltf.accessors?.count ?? 0, name: "indices") }
+                if let material = primitive.material { try reference(material, count: gltf.materials?.count ?? 0, name: "material") }
+            }
+        }
+        for accessor in gltf.accessors ?? [] {
+            guard accessor.count >= 0, (accessor.byteOffset ?? 0) >= 0 else { throw GLBLoaderError.invalidContainer("accessor 음수 범위") }
+            if let view = accessor.bufferView { try reference(view, count: gltf.bufferViews?.count ?? 0, name: "bufferView") }
+        }
+        for view in gltf.bufferViews ?? [] {
+            try reference(view.buffer, count: gltf.buffers?.count ?? 0, name: "buffer")
+            guard (view.byteOffset ?? 0) >= 0, view.byteLength >= 0,
+                  view.byteStride.map({ (4...252).contains($0) && $0 % 4 == 0 }) ?? true else {
+                throw GLBLoaderError.invalidContainer("bufferView 범위 또는 stride")
+            }
+        }
+        for buffer in gltf.buffers ?? [] {
+            guard buffer.byteLength >= 0 else { throw GLBLoaderError.invalidContainer("buffer 음수 길이") }
+        }
+        for material in gltf.materials ?? [] {
+            for info in [material.pbrMetallicRoughness?.baseColorTexture, material.pbrMetallicRoughness?.metallicRoughnessTexture, material.normalTexture].compactMap({ $0 }) {
+                try reference(info.index, count: gltf.textures?.count ?? 0, name: "texture")
+            }
+        }
+        for texture in gltf.textures ?? [] {
+            if let source = texture.source { try reference(source, count: gltf.images?.count ?? 0, name: "image") }
+        }
+        for image in gltf.images ?? [] {
+            if let view = image.bufferView { try reference(view, count: gltf.bufferViews?.count ?? 0, name: "image bufferView") }
+        }
+    }
 
     private struct Context {
         let gltf: GLTF
@@ -110,11 +182,15 @@ public enum GLBLoader {
     }
 
     private static func visit(node index: Int, parent: float4x4, context: inout Context, into merged: inout MeshData, visited: inout Set<Int>) throws {
-        guard let nodes = context.gltf.nodes, index < nodes.count, !visited.contains(index) else { return }
+        try Task.checkCancellation()
+        guard let nodes = context.gltf.nodes, nodes.indices.contains(index) else { throw GLBLoaderError.invalidContainer("node 인덱스") }
+        guard !visited.contains(index) else { throw GLBLoaderError.invalidContainer("노드 순환 또는 중복 참조") }
+        guard visited.count < 256 else { throw GLBLoaderError.unsupported("256단계 이상의 노드 계층") }
         visited.insert(index)
+        defer { visited.remove(index) }
         let node = nodes[index]
         let world = parent * localTransform(node)
-        if let meshIndex = node.mesh, let meshes = context.gltf.meshes, meshIndex < meshes.count {
+        if let meshIndex = node.mesh, let meshes = context.gltf.meshes, meshes.indices.contains(meshIndex) {
             for primitive in meshes[meshIndex].primitives {
                 try append(primitive: primitive, transform: world, context: &context, into: &merged)
             }
@@ -152,10 +228,15 @@ public enum GLBLoader {
         guard mode == 4 || mode == 5 || mode == 6 else { return }   // 점/선은 무시
         guard let positionAccessor = primitive.attributes["POSITION"] else { return }
 
-        let positions = try readVectors(accessor: positionAccessor, context: &context).map { SIMD3($0.x, $0.y, $0.z) }
+        let positions = try readVectors(accessor: positionAccessor, expectedType: "VEC3", context: &context).map { SIMD3($0.x, $0.y, $0.z) }
         guard !positions.isEmpty else { return }
-        let normals = try primitive.attributes["NORMAL"].map { try readVectors(accessor: $0, context: &context).map { SIMD3($0.x, $0.y, $0.z) } }
-        let uvs = try primitive.attributes["TEXCOORD_0"].map { try readVectors(accessor: $0, context: &context).map { SIMD2($0.x, $0.y) } }
+        let normals = try primitive.attributes["NORMAL"].map { try readVectors(accessor: $0, expectedType: "VEC3", context: &context).map { SIMD3($0.x, $0.y, $0.z) } }
+        let uvs = try primitive.attributes["TEXCOORD_0"].map { try readVectors(accessor: $0, expectedType: "VEC2", context: &context).map { SIMD2($0.x, $0.y) } }
+        guard normals.map({ $0.count == positions.count }) ?? true,
+              uvs.map({ $0.count == positions.count }) ?? true,
+              positions.count <= Int(UInt32.max) - merged.vertices.count else {
+            throw GLBLoaderError.invalidContainer("정점 속성 개수")
+        }
 
         var localIndices: [UInt32]
         if let indexAccessor = primitive.indices {
@@ -163,10 +244,11 @@ public enum GLBLoader {
         } else {
             localIndices = (0..<UInt32(positions.count)).map { $0 }
         }
-        localIndices = triangulate(localIndices, mode: mode).filter { Int($0) < positions.count ? true : false }
-        let usable = localIndices.count - localIndices.count % 3
-        guard usable >= 3 else { return }
-        localIndices = Array(localIndices.prefix(usable))
+        guard localIndices.allSatisfy({ Int($0) < positions.count }), mode != 4 || localIndices.count % 3 == 0 else {
+            throw GLBLoaderError.invalidContainer("삼각형 인덱스 범위 또는 개수")
+        }
+        localIndices = triangulate(localIndices, mode: mode)
+        guard !localIndices.isEmpty else { return }
 
         // 노멀 없으면 면 노멀 누적으로 생성
         let finalNormals: [SIMD3<Float>]
@@ -189,6 +271,9 @@ public enum GLBLoader {
             var v = Vertex()
             let p = transform * SIMD4(positions[i], 1)
             v.position = SIMD3(p.x, p.y, p.z) / (p.w == 0 ? 1 : p.w)
+            guard v.position.x.isFinite, v.position.y.isFinite, v.position.z.isFinite else {
+                throw GLBLoaderError.invalidContainer("유한하지 않은 변환된 정점")
+            }
             let n = normalMatrix * finalNormals[i]
             v.normal = simd_length(n) > 0 ? simd_normalize(n) : SIMD3(0, 1, 0)
             // glTF UV는 좌상단 원점. 셰이더가 Model I/O 규약(좌하단)으로 v를 뒤집으므로 여기서 미리 맞춘다.
@@ -281,13 +366,16 @@ public enum GLBLoader {
             guard let decoded = Data(base64Encoded: payload) else { throw GLBLoaderError.invalidContainer("base64") }
             return decoded
         }
-        let decoded = uri.removingPercentEncoding ?? uri
-        return try Data(contentsOf: context.baseURL.appendingPathComponent(decoded))
+        guard let resource = URL(string: uri, relativeTo: context.baseURL.appendingPathComponent("", isDirectory: true)),
+              resource.isFileURL, resource.query == nil, resource.fragment == nil else {
+            throw GLBLoaderError.unsupported("외부 리소스 URI: \(uri)")
+        }
+        return try Data(contentsOf: resource)
     }
 
     private static func bufferData(_ index: Int, context: inout Context) throws -> Data {
         if let cached = context.bufferCache[index] { return cached }
-        guard let buffers = context.gltf.buffers, index < buffers.count else { throw GLBLoaderError.missing("buffer \(index)") }
+        guard let buffers = context.gltf.buffers, buffers.indices.contains(index) else { throw GLBLoaderError.missing("buffer \(index)") }
         let data: Data
         if let uri = buffers[index].uri {
             data = try resolveURI(uri, context: &context)
@@ -296,16 +384,21 @@ public enum GLBLoader {
         } else {
             throw GLBLoaderError.missing("BIN 청크")
         }
-        context.bufferCache[index] = data
-        return data
+        let length = buffers[index].byteLength
+        guard length >= 0, length <= data.count else { throw GLBLoaderError.invalidContainer("buffer 길이") }
+        let bounded = Data(data.prefix(length))
+        context.bufferCache[index] = bounded
+        return bounded
     }
 
     private static func bufferViewData(_ index: Int, context: inout Context) throws -> Data {
-        guard let views = context.gltf.bufferViews, index < views.count else { throw GLBLoaderError.missing("bufferView \(index)") }
+        guard let views = context.gltf.bufferViews, views.indices.contains(index) else { throw GLBLoaderError.missing("bufferView \(index)") }
         let view = views[index]
         let buffer = try bufferData(view.buffer, context: &context)
         let start = view.byteOffset ?? 0
-        guard start + view.byteLength <= buffer.count else { throw GLBLoaderError.invalidContainer("bufferView 범위") }
+        guard start >= 0, start <= buffer.count, view.byteLength >= 0, view.byteLength <= buffer.count - start else {
+            throw GLBLoaderError.invalidContainer("bufferView 범위")
+        }
         return buffer.subdata(in: start..<start + view.byteLength)
     }
 
@@ -329,26 +422,25 @@ public enum GLBLoader {
     }
 
     /// 접근자를 float 벡터(부족한 성분은 0)로 읽는다. 정규화 정수 포맷 지원.
-    private static func readVectors(accessor index: Int, context: inout Context) throws -> [SIMD4<Float>] {
-        guard let accessors = context.gltf.accessors, index < accessors.count else { throw GLBLoaderError.missing("accessor \(index)") }
+    private static func readVectors(accessor index: Int, expectedType: String, context: inout Context) throws -> [SIMD4<Float>] {
+        guard let accessors = context.gltf.accessors, accessors.indices.contains(index) else { throw GLBLoaderError.missing("accessor \(index)") }
         let accessor = accessors[index]
         if accessor.sparse != nil { throw GLBLoaderError.unsupported("sparse accessor") }
-        guard let compSize = componentSize(accessor.componentType), let compCount = componentCount(accessor.type) else {
+        guard accessor.type == expectedType, let compSize = componentSize(accessor.componentType), let compCount = componentCount(accessor.type) else {
             throw GLBLoaderError.unsupported("accessor type \(accessor.type)/\(accessor.componentType)")
         }
         guard let viewIndex = accessor.bufferView else {
-            return [SIMD4<Float>](repeating: .zero, count: accessor.count)
+            throw GLBLoaderError.unsupported("bufferView 없는 정점 accessor")
         }
         let view = try bufferViewData(viewIndex, context: &context)
         let stride = context.gltf.bufferViews![viewIndex].byteStride ?? compSize * compCount
         let start = accessor.byteOffset ?? 0
-        guard accessor.count == 0 || start + (accessor.count - 1) * stride + compSize * compCount <= view.count else {
-            throw GLBLoaderError.invalidContainer("accessor 범위")
-        }
+        try validateRange(count: accessor.count, start: start, stride: stride, elementSize: compSize * compCount, byteCount: view.count)
         let normalized = accessor.normalized ?? false
         var out = [SIMD4<Float>](repeating: .zero, count: accessor.count)
-        view.withUnsafeBytes { raw in
+        try view.withUnsafeBytes { raw in
             for i in 0..<accessor.count {
+                if i % 1024 == 0 { try Task.checkCancellation() }
                 var v = SIMD4<Float>.zero
                 for c in 0..<compCount {
                     let offset = start + i * stride + c * compSize
@@ -356,6 +448,9 @@ public enum GLBLoader {
                 }
                 out[i] = v
             }
+        }
+        guard out.allSatisfy({ $0.x.isFinite && $0.y.isFinite && $0.z.isFinite && $0.w.isFinite }) else {
+            throw GLBLoaderError.invalidContainer("유한하지 않은 정점 속성")
         }
         return out
     }
@@ -373,22 +468,22 @@ public enum GLBLoader {
     }
 
     private static func readIndices(accessor index: Int, context: inout Context) throws -> [UInt32] {
-        guard let accessors = context.gltf.accessors, index < accessors.count else { throw GLBLoaderError.missing("accessor \(index)") }
+        guard let accessors = context.gltf.accessors, accessors.indices.contains(index) else { throw GLBLoaderError.missing("accessor \(index)") }
         let accessor = accessors[index]
         if accessor.sparse != nil { throw GLBLoaderError.unsupported("sparse accessor") }
-        guard let compSize = componentSize(accessor.componentType), accessor.type == "SCALAR" else {
+        guard [5121, 5123, 5125].contains(accessor.componentType), accessor.normalized != true,
+              let compSize = componentSize(accessor.componentType), accessor.type == "SCALAR" else {
             throw GLBLoaderError.unsupported("index accessor \(accessor.type)")
         }
         guard let viewIndex = accessor.bufferView else { throw GLBLoaderError.missing("index bufferView") }
         let view = try bufferViewData(viewIndex, context: &context)
         let stride = context.gltf.bufferViews![viewIndex].byteStride ?? compSize
         let start = accessor.byteOffset ?? 0
-        guard accessor.count == 0 || start + (accessor.count - 1) * stride + compSize <= view.count else {
-            throw GLBLoaderError.invalidContainer("index accessor 범위")
-        }
+        try validateRange(count: accessor.count, start: start, stride: stride, elementSize: compSize, byteCount: view.count)
         var out = [UInt32](repeating: 0, count: accessor.count)
-        view.withUnsafeBytes { raw in
+        try view.withUnsafeBytes { raw in
             for i in 0..<accessor.count {
+                if i % 1024 == 0 { try Task.checkCancellation() }
                 let offset = start + i * stride
                 switch accessor.componentType {
                 case 5121: out[i] = UInt32(raw.loadUnaligned(fromByteOffset: offset, as: UInt8.self))
@@ -401,6 +496,17 @@ public enum GLBLoader {
     }
 
     // MARK: - JSON 스키마 (필요한 필드만)
+
+    private static func validateRange(count: Int, start: Int, stride: Int, elementSize: Int, byteCount: Int) throws {
+        guard count >= 0, start >= 0, start <= byteCount, stride >= elementSize else {
+            throw GLBLoaderError.invalidContainer("accessor 범위 또는 stride")
+        }
+        guard count > 0 else { return }
+        let available = byteCount - start
+        guard elementSize <= available, count - 1 <= (available - elementSize) / stride else {
+            throw GLBLoaderError.invalidContainer("accessor 범위")
+        }
+    }
 
     private struct GLTF: Decodable {
         struct Scene: Decodable { var nodes: [Int]? }

@@ -53,12 +53,23 @@ public enum MeshletBuilder {
         maxTriangles: Int = Int(MESHLET_MAX_TRIANGLES),
         strategy: Strategy = .cluster
     ) -> MeshletMesh {
+        build(mesh, maxVertices: maxVertices, maxTriangles: maxTriangles, strategy: strategy, cancellationCheck: {})
+    }
+
+    public static func build(
+        _ mesh: MeshData,
+        maxVertices: Int = Int(MESHLET_MAX_VERTICES),
+        maxTriangles: Int = Int(MESHLET_MAX_TRIANGLES),
+        strategy: Strategy = .cluster,
+        cancellationCheck: () throws -> Void
+    ) rethrows -> MeshletMesh {
+        try cancellationCheck()
         precondition(maxVertices <= 256 && maxTriangles <= 512, "Metal 메시 셰이더 한계 초과")
         precondition(maxVertices >= 3 && maxTriangles >= 1)
         switch strategy {
-        case .cluster: return buildClustered(mesh, maxVertices: maxVertices, maxTriangles: maxTriangles)
-        case .spatialScan: return buildScan(mesh, maxVertices: maxVertices, maxTriangles: maxTriangles, spatialSort: true)
-        case .scan: return buildScan(mesh, maxVertices: maxVertices, maxTriangles: maxTriangles, spatialSort: false)
+        case .cluster: return try buildClustered(mesh, maxVertices: maxVertices, maxTriangles: maxTriangles, cancellationCheck: cancellationCheck)
+        case .spatialScan: return try buildScan(mesh, maxVertices: maxVertices, maxTriangles: maxTriangles, spatialSort: true, cancellationCheck: cancellationCheck)
+        case .scan: return try buildScan(mesh, maxVertices: maxVertices, maxTriangles: maxTriangles, spatialSort: false, cancellationCheck: cancellationCheck)
         }
     }
 
@@ -69,7 +80,7 @@ public enum MeshletBuilder {
 
     // MARK: - 스캔 방식
 
-    private static func buildScan(_ mesh: MeshData, maxVertices: Int, maxTriangles: Int, spatialSort: Bool) -> MeshletMesh {
+    private static func buildScan(_ mesh: MeshData, maxVertices: Int, maxTriangles: Int, spatialSort: Bool, cancellationCheck: () throws -> Void) rethrows -> MeshletMesh {
         let vertices = mesh.vertices
         // 삼각형 순서: 재질 우선, 그 안에서 (선택) Morton 순. 메시렛은 재질 하나만 갖는다.
         let order = triangleOrder(mesh, spatialSort: spatialSort)
@@ -110,6 +121,7 @@ public enum MeshletBuilder {
         }
 
         for t in 0..<triangleTotal {
+            if t % 1024 == 0 { try cancellationCheck() }
             let a = indices[t * 3], b = indices[t * 3 + 1], c = indices[t * 3 + 2]
             let newVertices = (localIndex[Int(a)] < 0 ? 1 : 0)
                 + (localIndex[Int(b)] < 0 && b != a ? 1 : 0)
@@ -138,7 +150,7 @@ public enum MeshletBuilder {
 
     // MARK: - 클러스터 방식
 
-    private static func buildClustered(_ mesh: MeshData, maxVertices: Int, maxTriangles: Int) -> MeshletMesh {
+    private static func buildClustered(_ mesh: MeshData, maxVertices: Int, maxTriangles: Int, cancellationCheck: () throws -> Void) rethrows -> MeshletMesh {
         let vertices = mesh.vertices
         let indices = mesh.indices
         let triangleTotal = indices.count / 3
@@ -303,6 +315,7 @@ public enum MeshletBuilder {
         }
 
         while true {
+            try cancellationCheck()
             var next = pickBest()
             if next == nil {
                 // 인접 후보가 없다(섬 경계). 가까운 미사용 삼각형이면 같은 메시렛에 이어 담고, 멀면 메시렛을 닫는다.

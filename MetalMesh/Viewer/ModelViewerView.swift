@@ -189,15 +189,20 @@ struct ModelViewerView: View {
         do {
             state = .loading("파일 읽는 중…")
             let mesh = try await ModelLoader.load(url: url)
+            try Task.checkCancellation()
             state = .loading("메시렛·LOD 생성 중… (\(mesh.triangleCount.formatted()) 삼각형)")
-            let meshlets = await Task.detached(priority: .userInitiated) { MeshletLODBuilder.build(mesh) }.value
+            let meshlets = try await MeshletLODBuilder.buildAsync(mesh)
+            try Task.checkCancellation()
             let renderer = try Renderer(device: device, mesh: meshlets, materials: mesh.materials)
             renderer.camera.frame(center: mesh.boundsCenter, radius: mesh.boundsRadius)
             renderer.settings = settings
             renderer.onStats = { [stats] in stats.apply($0) }
             stats.apply(renderer.stats)
             state = .ready(renderer)
+        } catch is CancellationError {
+            return
         } catch {
+            guard !Task.isCancelled else { return }
             state = .failed(error.localizedDescription)
         }
     }

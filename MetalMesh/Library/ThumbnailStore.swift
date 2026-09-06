@@ -10,7 +10,7 @@ import UniformTypeIdentifiers
 @MainActor
 @Observable
 final class ThumbnailStore {
-    static let pixelSize = (width: 320, height: 240)
+    nonisolated static let pixelSize = (width: 320, height: 240)
 
     private(set) var images: [UUID: CGImage] = [:]
     private(set) var failed: Set<UUID> = []
@@ -19,17 +19,21 @@ final class ThumbnailStore {
     private let fileURL: (ModelEntry) -> URL?
     private var pending: [ModelEntry] = []
     private var queued: Set<UUID> = []
-    private var isRunning = false
-    @ObservationIgnored private let device: MTLDevice? = MTLCreateSystemDefaultDevice()
+    @ObservationIgnored private var queueTask: Task<Void, Never>?
+    @ObservationIgnored private var activeTask: Task<CGImage?, Never>?
+    private var activeID: UUID?
+    @ObservationIgnored private let renderImage: @Sendable (URL) async throws -> CGImage?
 
-    init(directory: URL, fileURL: @escaping (ModelEntry) -> URL?) {
+    init(directory: URL, fileURL: @escaping (ModelEntry) -> URL?,
+         renderImage: @escaping @Sendable (URL) async throws -> CGImage? = { try await ThumbnailStore.renderImage(url: $0) }) {
         self.directory = directory
         self.fileURL = fileURL
+        self.renderImage = renderImage
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
     convenience init(library: ModelLibrary) {
-        self.init(directory: library.thumbnailsDirectory) { library.fileURL(for: $0) }
+        self.init(directory: library.thumbnailsDirectory, fileURL: { library.fileURL(for: $0) })
     }
 
     func url(for entry: ModelEntry) -> URL {
@@ -51,12 +55,15 @@ final class ThumbnailStore {
         guard images[entry.id] == nil, !failed.contains(entry.id), !queued.contains(entry.id) else { return }
         queued.insert(entry.id)
         pending.append(entry)
-        if !isRunning { Task { await runQueue() } }
+        if queueTask == nil { queueTask = Task { await runQueue() } }
     }
 
     func invalidate(_ entry: ModelEntry) {
         images[entry.id] = nil
         failed.remove(entry.id)
+        pending.removeAll { $0.id == entry.id }
+        queued.remove(entry.id)
+        if activeID == entry.id { activeTask?.cancel() }
         try? FileManager.default.removeItem(at: url(for: entry))
     }
 
@@ -65,39 +72,60 @@ final class ThumbnailStore {
     /// 파일을 읽어 메시렛을 만들고 오프스크린 렌더한다. 결과는 디스크와 메모리 캐시에 저장된다.
     @discardableResult
     func generate(_ entry: ModelEntry) async -> CGImage? {
-        guard let source = fileURL(entry), let device else {
-            failed.insert(entry.id)
-            return nil
-        }
-        do {
-            let mesh = try await ModelLoader.load(url: source)
-            let meshlets = await Task.detached(priority: .utility) { MeshletBuilder.build(mesh) }.value
-            let renderer = try Renderer(device: device, mesh: meshlets, materials: mesh.materials)
-            renderer.camera.frame(center: mesh.boundsCenter, radius: mesh.boundsRadius)
-            guard let image = renderer.snapshot(width: Self.pixelSize.width, height: Self.pixelSize.height) else {
-                failed.insert(entry.id)
-                return nil
-            }
-            if let png = Renderer.pngData(image) {
-                try? png.write(to: url(for: entry), options: .atomic)
-            }
-            images[entry.id] = image
-            return image
-        } catch {
-            failed.insert(entry.id)
-            return nil
-        }
+        if let image = images[entry.id] { return image }
+        request(entry)
+        await waitUntilIdle()
+        return images[entry.id]
+    }
+
+    func waitUntilIdle() async {
+        while let task = queueTask { await task.value }
     }
 
     private func runQueue() async {
-        isRunning = true
-        defer { isRunning = false }
+        defer { queueTask = nil }
         while !pending.isEmpty {
             let entry = pending.removeFirst()
-            queued.remove(entry.id)
-            if images[entry.id] == nil, !failed.contains(entry.id) {
-                await generate(entry)
+            guard let source = fileURL(entry) else {
+                queued.remove(entry.id)
+                failed.insert(entry.id)
+                continue
             }
+            let task = Task<CGImage?, Never> { [renderImage] in
+                do {
+                    let image = try await renderImage(source)
+                    try Task.checkCancellation()
+                    return image
+                } catch {
+                    return nil
+                }
+            }
+            activeID = entry.id
+            activeTask = task
+            let image = await task.value
+            activeID = nil
+            activeTask = nil
+            if !pending.contains(where: { $0.id == entry.id }) { queued.remove(entry.id) }
+            guard !task.isCancelled else { continue }
+            if let image {
+                if let png = Renderer.pngData(image) { try? png.write(to: url(for: entry), options: .atomic) }
+                images[entry.id] = image
+            } else {
+                failed.insert(entry.id)
+            }
+        }
+    }
+
+    nonisolated private static func renderImage(url: URL) async throws -> CGImage? {
+        let mesh = try await ModelLoader.load(url: url)
+        return try await BackgroundWork.run(priority: .utility) {
+            let meshlets = try MeshletBuilder.build(mesh, cancellationCheck: Task.checkCancellation)
+            try Task.checkCancellation()
+            guard let device = MTLCreateSystemDefaultDevice() else { return nil }
+            let renderer = try Renderer(device: device, mesh: meshlets, materials: mesh.materials)
+            renderer.camera.frame(center: mesh.boundsCenter, radius: mesh.boundsRadius)
+            try Task.checkCancellation()
+            return renderer.snapshot(width: Self.pixelSize.width, height: Self.pixelSize.height)
         }
     }
 

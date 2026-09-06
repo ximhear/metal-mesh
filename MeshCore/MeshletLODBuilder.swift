@@ -7,7 +7,7 @@ import simd
 /// 다시 메시렛으로 나눠 레벨 L+1을 만든다. 그룹의 (경계 구, 오차)를 자식 메시렛의 parent와 부모 메시렛의 self에
 /// 똑같이 기록하면 GPU가 "self 오차 ≤ 임계값 < parent 오차"만으로 크랙 없는 컷을 고른다.
 public enum MeshletLODBuilder {
-    public struct Options {
+    public struct Options: Sendable {
         public var maxLevels = 12
         public var groupSize = 4
         /// 그룹 단순화가 이 비율 이상 삼각형을 남기면 더 거친 레벨을 만들지 않는다 (루트로 확정)
@@ -17,7 +17,12 @@ public enum MeshletLODBuilder {
 
     /// LOD0 메시렛을 만들고 그 위에 계층을 쌓는다.
     public static func build(_ mesh: MeshData, options: Options = Options()) -> MeshletMesh {
-        var result = MeshletBuilder.build(mesh, strategy: .cluster)
+        build(mesh, options: options, cancellationCheck: {})
+    }
+
+    public static func build(_ mesh: MeshData, options: Options = Options(), cancellationCheck: () throws -> Void) rethrows -> MeshletMesh {
+        try cancellationCheck()
+        var result = try MeshletBuilder.build(mesh, strategy: .cluster, cancellationCheck: cancellationCheck)
         guard !result.meshlets.isEmpty else { return result }
         let vertices = mesh.vertices
 
@@ -33,6 +38,7 @@ public enum MeshletLODBuilder {
         var current = Array(0..<result.meshlets.count)   // 현재 레벨의 메시렛 인덱스
         var level: UInt32 = 0
         while current.count > 1 && Int(level) < options.maxLevels {
+            try cancellationCheck()
             // 현재 레벨 삼각형 집합에 대한 정점 → 메시렛 인접, 에지 사용 수 (경계 잠금용)
             var vertexMeshlets: [UInt32: [Int32]] = [:]
             var edgeUse: [UInt64: Int32] = [:]
@@ -53,6 +59,7 @@ public enum MeshletLODBuilder {
 
             var next: [Int] = []
             for group in groups {
+                try cancellationCheck()
                 let groupSet = Set(group.map(Int32.init))
                 var tris: [UInt32] = []
                 for mi in group { tris += meshletTriangles[mi]! }
@@ -102,6 +109,12 @@ public enum MeshletLODBuilder {
             level += 1
         }
         return result
+    }
+
+    public static func buildAsync(_ mesh: MeshData, options: Options = Options()) async throws -> MeshletMesh {
+        try await BackgroundWork.run {
+            try build(mesh, options: options, cancellationCheck: Task.checkCancellation)
+        }
     }
 
     // MARK: - 그룹화

@@ -21,7 +21,7 @@ mesh 스테이지가 살아남은 메시렛만 삼각형으로 펼칩니다.
 
 ## 기능
 
-- **모델 라이브러리** 화면: 번들 샘플 25개 자동 등록, 파일 임포터·드래그&드롭으로 추가, 재시작 후에도 유지,
+- **모델 라이브러리** 화면: 번들 샘플 38개 자동 등록, 파일·폴더 임포터와 드래그&드롭으로 추가, 재시작 후에도 유지,
   항목별 썸네일(오프스크린 렌더, Documents/Thumbnails에 PNG 캐시)
 - **뷰어** 화면: 트랙볼 카메라(회전/줌/팬, 짐벌 락 없음), 표시 모드(셰이딩·메시렛 색·노멀), 컬링·오클루전·와이어프레임·텍스처 토글, 라이선스 정보 시트
 - **메시렛 컬링 3단**: 프러스텀(경계 구) → 노멀 콘(뒷면) → 2패스 Hi-Z 오클루전. 하단 통계 바에 그린/전체/가림 수와 GPU 시간 표시
@@ -29,7 +29,7 @@ mesh 스테이지가 살아남은 메시렛만 삼각형으로 펼칩니다.
   크랙 없는 컷을 고른다. 허용 오차(0.5~8px) 선택, 그린 삼각형 / 원본 삼각형 표시
 - **MetalFX 공간 업스케일링 + MSAA**: 내부 rgba16Float 타깃에 50~75%로 렌더한 뒤 `MTLFXSpatialScaler`로 출력 해상도로 키우고,
   MSAA 4x는 컬러·깊이(max 리졸브 → Hi-Z)에 적용. 프레젠트 패스가 드로어블에 복사
-- **그림자 + SSAO + 바닥(기본 꺼짐)**: 태양 방향광의 2048² 섀도 맵(같은 메시 셰이더 파이프라인을 깊이 전용으로, 같은 LOD 컷, PCF 3×3),
+- **그림자 + SSAO(기본 켜짐) + 바닥(기본 꺼짐)**: 태양 방향광의 2048² 섀도 맵(같은 메시 셰이더 파이프라인을 깊이 전용으로, 같은 LOD 컷, PCF 3×3),
   그림자를 받는 바닥 원판, 깊이 기반 SSAO(16 샘플 반구 + 블러)를 프레젠트에서 합성
 - **PBR(metallic-roughness) + IBL**: baseColor·노멀·러프니스·메탈릭 맵을 OBJ(.mtl), USDC, USDZ(내장), glTF 재질에서 추출.
   HDRI(Poly Haven CC0)로 조도 큐브맵·GGX 프리필터 스펙큘러·BRDF LUT를 시작 시 컴퓨트로 생성해 Cook-Torrance 셰이딩, ACES 톤매핑.
@@ -41,7 +41,7 @@ mesh 스테이지가 살아남은 메시렛만 삼각형으로 펼칩니다.
 ## 렌더링 파이프라인
 
 ```
-파일 ──▶ ModelLoader (Model I/O)      삼각형화, 노드 변환 적용, 노멀 생성, Vertex{pos,normal,uv} 48B로 정규화
+파일 ──▶ ModelLoader (Model I/O)      삼각형화, 노드 변환 적용, 노멀 생성, Vertex{pos,normal,uv,tangent} 64B로 정규화
          GLBLoader (glb/gltf)          같은 MeshData를 만드는 자체 glTF 2.0 파서
                                       서브메시 재질에서 baseColor 텍스처/색 추출, 삼각형별 재질 인덱스
      ──▶ MeshPostProcess              정점 용접(Model I/O가 면마다 쪼갠 정점 복원), 노멀 없으면 면적 가중 스무스 노멀, UV 기반 탄젠트
@@ -139,7 +139,7 @@ open MetalMesh.xcodeproj
 명령줄:
 
 ```bash
-# macOS 빌드 + 테스트 (66개)
+# macOS 빌드 + 테스트
 xcodebuild -project MetalMesh.xcodeproj -scheme MetalMesh -destination 'platform=macOS' \
   -derivedDataPath build/DerivedData test
 
@@ -152,6 +152,15 @@ TEST_RUNNER_METALMESH_SNAPSHOTS=1 xcodebuild ... -only-testing:MetalMeshTests/Sn
 ```
 
 ## 조작
+
+라이브러리의 **+** 메뉴에서 모델 파일 또는 **모델·텍스처 폴더 가져오기**를 선택합니다.
+
+- 파일 가져오기는 glTF/GLB의 외부 버퍼·이미지와 OBJ의 MTL·텍스처를 상대 경로 그대로 함께 복사합니다.
+- 관련 파일에 접근 권한이 없거나 모델 파일의 상위 폴더를 참조하면, 관련 파일을 모두 포함하는 폴더를 선택하세요.
+- 외부 레이어·텍스처를 사용하는 USD/USDA/USDC는 폴더로 가져오세요. 단일 USD 파일의 외부 참조는 자동 수집하지 않습니다.
+- 폴더 가져오기는 숨김 파일을 제외한 일반 파일과 하위 폴더 구조를 복사하고, 지원하는 모델 파일을 각각 등록합니다.
+  심볼릭 링크는 허용하지 않으며, OBJ/glTF의 폴더 밖 참조나 누락된 의존 파일은 오류로 표시합니다.
+  같은 폴더에서 가져온 모델들의 공유 리소스는 마지막 모델을 삭제할 때 함께 삭제합니다.
 
 | 동작 | macOS | iOS |
 |---|---|---|
@@ -171,16 +180,17 @@ MeshCore/                       메시 처리 프레임워크 (Debug에서도 -O
   MeshletLODBuilder             그룹화 → 단순화 → 재클러스터 계층, MeshletLOD(자기/부모 오차·경계 구)
   MeshSimplifier                쿼드릭 하프에지 붕괴 단순화 (잠금, 링크 조건)
   ModelProbe, ModelIOQueue      통계 프로브, Model I/O 직렬화 액터
+  BackgroundWork               백그라운드 작업으로 취소 전달
   Math                          투영/lookAt/프러스텀 평면
 MetalMesh/
   App/                          진입점, 기기 지원 검사, 미지원 안내
-  Library/                      ModelEntry, ModelLibrary(JSON 인덱스 + Documents/Models), ThumbnailStore, 리스트 화면
+  Library/                      ModelEntry, ModelLibrary(JSON 인덱스 + Documents/Models), ModelImport(의존 파일·폴더 복사), ThumbnailStore, 리스트 화면
   Rendering/                    Renderer(내부 타깃, 섀도, 2패스 오클루전, Hi-Z, SSAO, MSAA, MetalFX, 프레젠트), GPUMesh, IBLEnvironment, Snapshot,
                                 Shaders/(MeshShaders, HiZ, IBL, Ground, SSAO, Present)
   Resources/Environment/        HDRI (Poly Haven studio_small_09, CC0)
   Viewer/                       ModelViewerView, MetalView(제스처), OrbitCamera
   Resources/Samples/            번들 샘플 모델 + 폴더별 LICENSE.txt + MODELS.md
-Tests/                          Swift Testing 66개 (레이아웃, 라이브러리, 썸네일, 로더·재질, glTF, 메시렛, 오프스크린 렌더)
+Tests/                          Swift Testing (레이아웃, 라이브러리·의존 파일 임포트, 썸네일 큐, 로더·재질, 손상된 glTF, 취소, 메시렛, 오프스크린 렌더)
 scripts/probe-model.swift       Model I/O 로드 검증 CLI
 scripts/bench-meshlets.swift    메시렛 빌더 벤치마크 (-O CLI)
 .claude/skills/fetch-3d-model/  무료 소스(Poly Haven, Sketchfab, Poly Pizza, GitHub 테스트 메시)에서 모델을 받는 절차
@@ -189,6 +199,11 @@ PLAN.md                         단계별 계획과 진행 상태
 
 ## 알아둘 점
 
+- glTF 로더는 참조 인덱스, 버퍼·접근자 범위, 인덱스 타입, 삼각형 인덱스, GLB 길이를 검사합니다.
+  sparse accessor, bufferView 없는 정점 accessor와 256단계 이상의 노드 계층은 지원하지 않습니다.
+- 뷰어에서 나가면 로딩 취소를 전달하고 메시렛·LOD 생성의 작업 경계에서 중단합니다.
+  이미 실행 중인 Model I/O 호출이나 GPU 작업 자체를 강제 중단하지는 않으며, 완료된 결과를 폐기합니다.
+  썸네일은 단일 큐에서 중복 요청을 합치고, 전용 렌더러의 GPU 대기는 메인 스레드 밖에서 수행합니다.
 - **libusd 동시 로드 크래시**: Apple의 USD 런타임은 여러 스레드에서 USD 파일을 동시에 처음 열면 크래시합니다
   (`Sdf_GetExtension` 널 포인터). 모든 Model I/O 호출은 `ModelIOQueue` 액터로 직렬화합니다.
 - Model I/O는 노멀이 없는 OBJ에 `addNormals`를 쓰면 면마다 정점을 쪼갭니다(bunny 35k → 208k 정점). 로더는 대신 정점을 용접하고 스무스 노멀을 직접 계산합니다.

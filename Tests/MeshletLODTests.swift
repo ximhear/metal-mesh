@@ -26,6 +26,18 @@ struct MeshletLODTests {
         return MeshData(vertices: vertices, indices: indices, boundsMin: .zero, boundsMax: SIMD3(Float(n), Float(n), 0))
     }
 
+    @Test func hierarchyStopsAtCancellationCheckpoint() {
+        let mesh = makeGrid(32)
+        var checkpoints = 0
+        #expect(throws: CancellationError.self) {
+            try MeshletLODBuilder.build(mesh, cancellationCheck: {
+                checkpoints += 1
+                if checkpoints == 4 { throw CancellationError() }
+            })
+        }
+        #expect(checkpoints == 4)
+    }
+
     @Test func simplifierHalvesFlatGridWithZeroError() {
         let mesh = makeGrid(20)   // 800 삼각형
         // 외곽 정점만 잠근다
