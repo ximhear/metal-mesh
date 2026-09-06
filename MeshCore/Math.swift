@@ -14,6 +14,17 @@ public enum Math {
         )
     }
 
+    /// 오른손 좌표계, Metal 깊이 [0, 1] 직교 투영
+    public static func orthographic(left: Float, right: Float, bottom: Float, top: Float, near: Float, far: Float) -> float4x4 {
+        let sx = 2 / (right - left), sy = 2 / (top - bottom), sz = 1 / (near - far)
+        return float4x4(
+            SIMD4(sx, 0, 0, 0),
+            SIMD4(0, sy, 0, 0),
+            SIMD4(0, 0, sz, 0),
+            SIMD4(-(right + left) / (right - left), -(top + bottom) / (top - bottom), near / (near - far), 1)
+        )
+    }
+
     public static func lookAt(eye: SIMD3<Float>, target: SIMD3<Float>, up: SIMD3<Float>) -> float4x4 {
         let f = simd_normalize(target - eye)          // 앞 (-z)
         let s = simd_normalize(simd_cross(f, up))     // 오른쪽

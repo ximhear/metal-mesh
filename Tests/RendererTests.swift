@@ -29,6 +29,13 @@ struct RendererTests {
         return MeshData(vertices: vertices, indices: indices, boundsMin: SIMD3(-0.5, -0.5, 0), boundsMax: SIMD3(0.5, 0.5, 0))
     }
 
+    /// 기하·컬링 테스트는 바닥/그림자/SSAO 없이 메시만 본다
+    private func plain(_ renderer: Renderer) {
+        renderer.settings.groundEnabled = false
+        renderer.settings.shadowsEnabled = false
+        renderer.settings.ssaoEnabled = false
+    }
+
     private struct Target {
         let color: MTLTexture
         let pass: MTLRenderPassDescriptor
@@ -67,6 +74,7 @@ struct RendererTests {
         try #require(device.supportsFamily(.metal3))
         let meshlets = MeshletBuilder.build(makeGridMesh(4))
         let renderer = try Renderer(device: device, mesh: meshlets)
+        plain(renderer)
         #expect(renderer.stats.meshletCount == meshlets.meshlets.count)
     }
 
@@ -74,6 +82,7 @@ struct RendererTests {
         let device = try #require(self.device)
         let mesh = makeGridMesh(8)
         let renderer = try Renderer(device: device, mesh: MeshletBuilder.build(mesh))
+        plain(renderer)
         renderer.camera.frame(center: mesh.boundsCenter, radius: mesh.boundsRadius)
         renderer.camera.yaw = 0
         renderer.camera.pitch = 0
@@ -88,6 +97,7 @@ struct RendererTests {
         let device = try #require(self.device)
         let mesh = makeGridMesh(8)
         let renderer = try Renderer(device: device, mesh: MeshletBuilder.build(mesh))
+        plain(renderer)
         renderer.camera.frame(center: mesh.boundsCenter, radius: mesh.boundsRadius)
         renderer.camera.yaw = .pi     // 뒤에서 본다 → 평면 노멀(+z)이 카메라 반대
         renderer.camera.pitch = 0
@@ -110,6 +120,7 @@ struct RendererTests {
         let mesh = try await ModelLoader.load(url: samples.appendingPathComponent("stanford-bunny/stanford-bunny.obj"))
         let meshlets = MeshletBuilder.build(mesh)
         let renderer = try Renderer(device: device, mesh: meshlets)
+        plain(renderer)
         renderer.camera.frame(center: mesh.boundsCenter, radius: mesh.boundsRadius)
         let target = try makeTarget(device: device)
 
@@ -133,6 +144,7 @@ struct RendererTests {
         let samples = try #require(Bundle.main.url(forResource: "Samples", withExtension: nil))
         let mesh = try await ModelLoader.load(url: samples.appendingPathComponent("food_apple_01/food_apple_01_1k.usdc"))
         let renderer = try Renderer(device: device, mesh: MeshletBuilder.build(mesh), materials: mesh.materials)
+        plain(renderer)
         #expect(renderer.stats.textureCount >= 1)
         renderer.camera.frame(center: mesh.boundsCenter, radius: mesh.boundsRadius)
         let target = try makeTarget(device: device)
@@ -172,6 +184,7 @@ struct RendererTests {
         let normalized = GPUMesh.normalizedRGBA(image)
         #expect(normalized.bitsPerPixel == 32 && normalized.width == image.width)
         let renderer = try Renderer(device: device, mesh: MeshletBuilder.build(mesh), materials: mesh.materials)
+        plain(renderer)
         #expect(renderer.stats.textureCount >= 1)
     }
 
@@ -187,6 +200,7 @@ struct RendererTests {
                 let meshlets = MeshletBuilder.build(mesh, strategy: strategy)
                 let ms = Date().timeIntervalSince(t0) * 1000
                 let renderer = try Renderer(device: device, mesh: meshlets, materials: mesh.materials)
+                plain(renderer)
                 renderer.camera.frame(center: mesh.boundsCenter, radius: mesh.boundsRadius)
                 var visibleSum = 0
                 var occlusionDrawnSum = 0
@@ -239,6 +253,7 @@ struct RendererTests {
         let mesh = makeTwoPlanes(8)
         let meshlets = MeshletBuilder.build(mesh, maxVertices: 32, maxTriangles: 40)
         let renderer = try Renderer(device: device, mesh: meshlets)
+        plain(renderer)
         renderer.camera.frame(center: mesh.boundsCenter, radius: mesh.boundsRadius)
         renderer.camera.yaw = 0
         renderer.camera.pitch = 0
@@ -266,6 +281,7 @@ struct RendererTests {
         let samples = try #require(Bundle.main.url(forResource: "Samples", withExtension: nil))
         let mesh = try await ModelLoader.load(url: samples.appendingPathComponent("stanford-bunny/stanford-bunny.obj"))
         let renderer = try Renderer(device: device, mesh: MeshletBuilder.build(mesh))
+        plain(renderer)
         renderer.camera.frame(center: mesh.boundsCenter, radius: mesh.boundsRadius)
         let target = try makeTarget(device: device)
         func pixels() -> [UInt8] {
@@ -297,6 +313,7 @@ struct RendererTests {
         let mesh = try await ModelLoader.load(url: samples.appendingPathComponent("stanford-bunny/stanford-bunny.obj"))
         let lodMesh = MeshletLODBuilder.build(mesh)
         let renderer = try Renderer(device: device, mesh: lodMesh, materials: mesh.materials)
+        plain(renderer)
         renderer.settings.cullingEnabled = false
         renderer.settings.occlusionEnabled = false
         renderer.camera.frame(center: mesh.boundsCenter, radius: mesh.boundsRadius)
@@ -338,6 +355,7 @@ struct RendererTests {
         let samples = try #require(Bundle.main.url(forResource: "Samples", withExtension: nil))
         let mesh = try await ModelLoader.load(url: samples.appendingPathComponent("stanford-bunny/stanford-bunny.obj"))
         let renderer = try Renderer(device: device, mesh: MeshletBuilder.build(mesh))
+        plain(renderer)
         renderer.camera.frame(center: mesh.boundsCenter, radius: mesh.boundsRadius)
         let target = try makeTarget(device: device, size: 256)
         func pixels() -> [UInt8] {
@@ -378,6 +396,46 @@ struct RendererTests {
         renderer.settings.renderScale = 1
         renderer.renderFrame(passDescriptor: target.pass, drawable: nil, waitUntilCompleted: true)
         #expect(meanAbsDiff(reference, pixels()) < 0.5)
+    }
+
+    @Test func shadowsAndSSAODarkenTheImage() async throws {
+        let device = try #require(self.device)
+        let samples = try #require(Bundle.main.url(forResource: "Samples", withExtension: nil))
+        let mesh = try await ModelLoader.load(url: samples.appendingPathComponent("stanford-bunny/stanford-bunny.obj"))
+        let renderer = try Renderer(device: device, mesh: MeshletBuilder.build(mesh))
+        renderer.camera.frame(center: mesh.boundsCenter, radius: mesh.boundsRadius)
+        renderer.camera.pitch = 0.6   // 위에서 봐서 바닥 그림자가 보이게
+        let target = try makeTarget(device: device, size: 256)
+        func meanLuma() -> Double {
+            var px = [UInt8](repeating: 0, count: target.size * target.size * 4)
+            target.color.getBytes(&px, bytesPerRow: target.size * 4, from: MTLRegionMake2D(0, 0, target.size, target.size), mipmapLevel: 0)
+            var sum = 0.0
+            for i in stride(from: 0, to: px.count, by: 4) { sum += 0.114 * Double(px[i]) + 0.587 * Double(px[i + 1]) + 0.299 * Double(px[i + 2]) }
+            return sum / Double(px.count / 4)
+        }
+        _ = try renderer.makeShadowPipeline()   // 깊이 전용 메시 파이프라인이 만들어져야 한다
+        renderer.settings.groundEnabled = true
+        renderer.settings.shadowsEnabled = false
+        renderer.settings.ssaoEnabled = false
+        renderer.renderFrame(passDescriptor: target.pass, drawable: nil, waitUntilCompleted: true)
+        let base = meanLuma()
+        #expect(coverage(of: target) > 0.3, "바닥이 화면을 채워야 한다")
+
+        renderer.settings.shadowsEnabled = true
+        renderer.renderFrame(passDescriptor: target.pass, drawable: nil, waitUntilCompleted: true)
+        let shadowed = meanLuma()
+        #expect(shadowed < base - 0.2, "그림자가 이미지를 어둡게 해야 한다: \(base) → \(shadowed)")
+
+        renderer.settings.ssaoEnabled = true
+        renderer.renderFrame(passDescriptor: target.pass, drawable: nil, waitUntilCompleted: true)
+        let ao = meanLuma()
+        #expect(ao < shadowed, "SSAO가 접촉부를 더 어둡게: \(shadowed) → \(ao)")
+        print("SHADOW luma base=\(base) shadows=\(shadowed) +ssao=\(ao)")
+
+        // 바닥 없이도 렌더 정상
+        renderer.settings.groundEnabled = false
+        renderer.renderFrame(passDescriptor: target.pass, drawable: nil, waitUntilCompleted: true)
+        #expect(coverage(of: target) > 0.05)
     }
 
     @Test func frustumPlanesContainCameraTarget() {

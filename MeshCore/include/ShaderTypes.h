@@ -74,7 +74,29 @@ typedef struct {
     float         lodThresholdPx;      // 허용 화면 오차 (픽셀)
     float         lodScale;            // viewportHeight / (2 tan(fov/2)) : 모델 단위 오차 → 픽셀
     unsigned int  padding2[2];
+    // 그림자 (태양 방향광)
+    simd_float4x4 lightViewProjection; // 모델 공간 → 라이트 클립 공간 (직교)
+    simd_float3   lightDirectionView;  // 뷰 공간, 표면 → 광원 방향 (정규화)
+    float         sunIntensity;
+    simd_float3   lodCameraPositionModel; // LOD 선택용 카메라 위치 (섀도 패스에서도 메인 카메라)
+    unsigned int  shadowsEnabled;
+    float         shadowBias;
+    float         groundY;             // 바닥 평면 높이 (모델 공간)
+    float         groundRadius;        // 바닥 평면 반지름
+    unsigned int  groundEnabled;
 } Uniforms;
+
+/// SSAO 컴퓨트 유니폼
+typedef struct {
+    simd_float4x4 projection;
+    simd_float4x4 inverseProjection;
+    simd_float2   screenSize;
+    float         radius;        // 뷰 공간 샘플 반지름
+    float         bias;
+    float         intensity;
+    unsigned int  frameIndex;
+    unsigned int  padding[2];
+} SSAOUniforms;
 
 /// 컬링 패스 종류 (object 스테이지 setObjectBytes로 전달)
 #define CULL_PASS_SINGLE 0   // 오클루전 없이 한 번에
@@ -128,6 +150,7 @@ typedef struct {
 #define TEXTURE_IBL_IRRADIANCE   0   // fragment: 조도 큐브맵
 #define TEXTURE_IBL_SPECULAR     1   // fragment: 프리필터 스펙큘러 큐브맵 (밉 = 러프니스)
 #define TEXTURE_IBL_BRDF_LUT     2   // fragment: split-sum BRDF LUT (x: nDotV, y: roughness)
+#define TEXTURE_SHADOW_MAP       3   // fragment: depth2d 섀도 맵
 #define BUFFER_STATS             2   // object 전용: atomic uint[STAT_COUNT]
 #define BUFFER_CULL_PASS         3   // object 전용: uint (CULL_PASS_*)
 #define BUFFER_VISIBILITY        4   // object 전용: uint[meshletCount], 지난 프레임 가시성

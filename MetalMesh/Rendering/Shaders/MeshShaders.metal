@@ -60,7 +60,7 @@ static bool occludedByHiZ(constant Uniforms& u, texture2d<float> hiz, float3 cen
 /// 모델 단위 오차를 화면 픽셀 오차로 (경계 구 표면까지의 거리 기준, 보수적)
 static float projectedError(constant Uniforms& u, float3 center, float radius, float error) {
     if (error >= LOD_ERROR_INFINITE) return INFINITY;
-    float dist = length(center - u.cameraPositionModel) - radius;
+    float dist = length(center - u.lodCameraPositionModel) - radius;
     if (dist <= 1e-6) return INFINITY;   // 카메라가 구 안 → 이 단계는 너무 거칠다
     return error * u.lodScale / dist;
 }
@@ -152,6 +152,7 @@ struct VertexOut {
     float3 positionView;
     float2 uv;
     float4 tangentView;   // xyz 뷰 공간 탄젠트, w 손잡이 (0이면 없음)
+    float3 positionModel;
 };
 
 struct PrimitiveOut {
@@ -184,6 +185,7 @@ void meshMain(MeshletMesh out,
         o.normalView = normalize(u.normalMatrix * v.normal);
         o.uv = v.uv;
         o.tangentView = float4(u.normalMatrix * v.tangent.xyz, v.tangent.w);
+        o.positionModel = v.position;
         out.set_vertex(tid, o);
     }
 
@@ -236,6 +238,23 @@ static float geometrySmith(float nDotV, float nDotL, float roughness) {
     return gv * gl;
 }
 
+/// PCF 3×3 섀도. 1 = 빛 받음
+static float shadowFactor(constant Uniforms& u, depth2d<float> shadowMap, float3 positionModel, float nDotL) {
+    if (u.shadowsEnabled == 0u) return 1.0;
+    float4 lc = u.lightViewProjection * float4(positionModel, 1.0);
+    float3 ndc = lc.xyz / lc.w;
+    float2 uv = float2(ndc.x * 0.5 + 0.5, 1.0 - (ndc.y * 0.5 + 0.5));
+    if (any(uv < 0.0) || any(uv > 1.0) || ndc.z > 1.0) return 1.0;
+    constexpr sampler shadowSampler(filter::linear, compare_func::less_equal, address::clamp_to_edge);
+    float bias = u.shadowBias * (1.0 + 2.0 * (1.0 - nDotL));
+    float2 texel = 1.0 / float2(shadowMap.get_width(), shadowMap.get_height());
+    float sum = 0.0;
+    for (int y = -1; y <= 1; ++y)
+        for (int x = -1; x <= 1; ++x)
+            sum += shadowMap.sample_compare(shadowSampler, uv + float2(x, y) * texel, ndc.z - bias);
+    return sum / 9.0;
+}
+
 static float3 acesToneMap(float3 x) {
     const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
     return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
@@ -246,7 +265,8 @@ fragment float4 fragmentMain(FragmentIn in [[stage_in]],
                              const device Material* materials      [[buffer(BUFFER_MATERIALS)]],
                              texturecube<float> irradianceMap      [[texture(TEXTURE_IBL_IRRADIANCE)]],
                              texturecube<float> specularMap        [[texture(TEXTURE_IBL_SPECULAR)]],
-                             texture2d<float> brdfLUT              [[texture(TEXTURE_IBL_BRDF_LUT)]])
+                             texture2d<float> brdfLUT              [[texture(TEXTURE_IBL_BRDF_LUT)]],
+                             depth2d<float> shadowMap              [[texture(TEXTURE_SHADOW_MAP)]])
 {
     float3 n = normalize(in.v.normalView);
     float3 viewDir = normalize(-in.v.positionView);
@@ -298,22 +318,38 @@ fragment float4 fragmentMain(FragmentIn in [[stage_in]],
         float2 brdf = brdfLUT.sample(iblSampler, float2(nDotV, roughness)).rg;
         float3 specular = prefiltered * (kS * brdf.x + brdf.y);
         color = kD * diffuse + specular;
+        // 태양 방향광 (그림자 있음)
+        if (u.sunIntensity > 0.0) {
+            float3 l = u.lightDirectionView;
+            float nDotL = max(dot(n, l), 0.0);
+            if (nDotL > 0.0) {
+                float shadow = shadowFactor(u, shadowMap, in.v.positionModel, nDotL);
+                float3 h = normalize(l + viewDir);
+                float3 F = f0 + (1.0 - f0) * pow(1.0 - max(dot(h, viewDir), 0.0), 5.0);
+                float D = distributionGGX(max(dot(n, h), 0.0), roughness);
+                float G = geometrySmith(nDotV, nDotL, roughness);
+                float3 spec = (D * G * F) / (4.0 * nDotV * nDotL + 1e-4);
+                float3 kDsun = (1.0 - F) * (1.0 - metallic);
+                color += (kDsun * albedo / 3.14159265 + spec) * nDotL * u.sunIntensity * shadow;
+            }
+        }
     } else {
         // 환경맵이 없을 때: 방향광 2개 + 앰비언트 (Cook-Torrance 직접광)
-        float3 lights[2] = { normalize(float3(0.35, 0.6, 1.0)), normalize(float3(-0.6, -0.2, 0.5)) };
+        float3 lights[2] = { u.lightDirectionView, normalize(float3(-0.6, -0.2, 0.5)) };
         float intensities[2] = { 2.2, 0.7 };
         color = albedo * (1.0 - metallic) * 0.15;
         for (int i = 0; i < 2; ++i) {
             float3 l = lights[i];
             float3 h = normalize(l + viewDir);
             float nDotL = max(dot(n, l), 0.0);
+            float shadow = i == 0 ? shadowFactor(u, shadowMap, in.v.positionModel, nDotL) : 1.0;
             float nDotH = max(dot(n, h), 0.0);
             float3 F = f0 + (1.0 - f0) * pow(1.0 - max(dot(h, viewDir), 0.0), 5.0);
             float D = distributionGGX(nDotH, roughness);
             float G = geometrySmith(nDotV, nDotL, roughness);
             float3 spec = (D * G * F) / (4.0 * nDotV * nDotL + 1e-4);
             float3 kD = (1.0 - F) * (1.0 - metallic);
-            color += (kD * albedo / 3.14159265 + spec) * nDotL * intensities[i];
+            color += (kD * albedo / 3.14159265 + spec) * nDotL * intensities[i] * shadow;
         }
     }
     color = acesToneMap(color * u.exposure);

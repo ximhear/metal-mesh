@@ -20,6 +20,8 @@ struct SnapshotTests {
         var lodThreshold: Float = 1
         var renderScale: Float = 1
         var msaa: Int = 1
+        /// 바닥 + 그림자 + SSAO
+        var extras: Bool = false
     }
 
     static let shots: [Shot] = [
@@ -43,6 +45,10 @@ struct SnapshotTests {
         // MetalFX 공간 업스케일 50% / MSAA 4x
         Shot(file: "Camera_01/Camera_01_1k.usdc", name: "camera-metalfx-50", mode: .shaded, yaw: 0.7, pitch: 0.3, renderScale: 0.5),
         Shot(file: "Camera_01/Camera_01_1k.usdc", name: "camera-msaa4", mode: .shaded, yaw: 0.7, pitch: 0.3, msaa: 4),
+        // 그림자 + SSAO + 바닥
+        Shot(file: "stanford-bunny/stanford-bunny.obj", name: "bunny-shadows", mode: .shaded, yaw: 0.8, pitch: 0.45, extras: true),
+        Shot(file: "lion-noe3d/lion-noe3d.usdz", name: "lion-shadows", mode: .shaded, yaw: 2.4, pitch: 0.35, extras: true),
+        Shot(file: "Ukulele_01/Ukulele_01_1k.usdc", name: "ukulele-shadows", mode: .shaded, yaw: 0.3, pitch: 0.7, extras: true),
     ]
 
     @Test func snapshotProducesImage() throws {
@@ -81,6 +87,9 @@ struct SnapshotTests {
             settings.lodThresholdPx = shot.lodThreshold
             settings.renderScale = shot.renderScale
             settings.msaaSamples = shot.msaa
+            settings.groundEnabled = shot.extras
+            settings.shadowsEnabled = shot.extras
+            settings.ssaoEnabled = shot.extras
             renderer.settings = settings
             let image = try #require(renderer.snapshot(width: 1200, height: 900))
             let png = try #require(Renderer.pngData(image))

@@ -107,6 +107,9 @@ struct ModelViewerView: View {
                 Toggle(isOn: $settings.texturesEnabled) { Label("텍스처", systemImage: "photo") }
                     .disabled(stats.textureCount == 0)
                 Toggle(isOn: $settings.iblEnabled) { Label("환경광", systemImage: "sun.max") }
+                Toggle(isOn: $settings.shadowsEnabled) { Label("그림자", systemImage: "shadow") }
+                Toggle(isOn: $settings.ssaoEnabled) { Label("SSAO", systemImage: "circle.lefthalf.filled") }
+                Toggle(isOn: $settings.groundEnabled) { Label("바닥", systemImage: "square.fill.on.square") }
                 Toggle(isOn: $settings.lodEnabled) { Label("LOD", systemImage: "square.3.layers.3d") }
                     .disabled(stats.lodLevelCount <= 1)
                 Picker("LOD 오차", selection: $settings.lodThresholdPx) {
@@ -134,6 +137,9 @@ struct ModelViewerView: View {
                     Toggle(isOn: $settings.texturesEnabled) { Label("텍스처", systemImage: "photo") }
                         .disabled(stats.textureCount == 0)
                     Toggle(isOn: $settings.iblEnabled) { Label("환경광 (IBL)", systemImage: "sun.max") }
+                    Toggle(isOn: $settings.shadowsEnabled) { Label("그림자", systemImage: "shadow") }
+                    Toggle(isOn: $settings.ssaoEnabled) { Label("SSAO", systemImage: "circle.lefthalf.filled") }
+                    Toggle(isOn: $settings.groundEnabled) { Label("바닥 평면", systemImage: "square.fill.on.square") }
                     Divider()
                     Toggle(isOn: $settings.lodEnabled) { Label("클러스터 LOD", systemImage: "square.3.layers.3d") }
                         .disabled(stats.lodLevelCount <= 1)

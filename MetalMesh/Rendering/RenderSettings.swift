@@ -33,6 +33,12 @@ struct RenderSettings: Equatable {
     var renderScale: Float = 1.0
     /// MSAA 샘플 수 (1 또는 4)
     var msaaSamples: Int = 1
+    /// 태양 방향광 섀도 맵
+    var shadowsEnabled = true
+    /// 그림자를 받는 바닥 평면
+    var groundEnabled = true
+    /// 화면 공간 앰비언트 오클루전
+    var ssaoEnabled = true
 }
 
 /// 렌더러가 프레임마다 채우는 통계. 메인 스레드에서 갱신된다.

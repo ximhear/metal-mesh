@@ -15,7 +15,15 @@ vertex PresentOut presentVertex(uint vid [[vertex_id]]) {
     return o;
 }
 
-fragment float4 presentFragment(PresentOut in [[stage_in]], texture2d<float> source [[texture(0)]]) {
+fragment float4 presentFragment(PresentOut in [[stage_in]],
+                                texture2d<float> source [[texture(0)]],
+                                texture2d<float> ao [[texture(1)]],
+                                constant float& aoStrength [[buffer(0)]]) {
     constexpr sampler s(filter::linear, address::clamp_to_edge);
-    return float4(source.sample(s, in.uv).rgb, 1.0);
+    float3 color = source.sample(s, in.uv).rgb;
+    if (aoStrength > 0.0) {
+        float a = ao.sample(s, in.uv).r;
+        color *= mix(1.0, a, aoStrength);
+    }
+    return float4(color, 1.0);
 }

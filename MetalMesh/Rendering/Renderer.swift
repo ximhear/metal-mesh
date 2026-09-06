@@ -45,7 +45,22 @@ final class Renderer: NSObject, MTKViewDelegate {
     private let commandQueue: MTLCommandQueue
     private let library: MTLLibrary
     private var meshPipelines: [Int: MTLRenderPipelineState] = [:]     // sampleCount → 파이프라인
+    private var groundPipelines: [Int: MTLRenderPipelineState] = [:]
     private var presentPipelines: [UInt: MTLRenderPipelineState] = [:] // 대상 포맷 → 파이프라인
+    private var shadowPipeline: MTLRenderPipelineState?
+    private let ssaoPipeline: MTLComputePipelineState
+    private let ssaoBlurPipeline: MTLComputePipelineState
+    private let shadowMap: MTLTexture
+    private let shadowUniformBuffers: [MTLBuffer]
+    private let shadowStatsBuffer: MTLBuffer
+    private let ssaoUniformBuffers: [MTLBuffer]
+    /// 모델 경계 (그림자 프러스텀·바닥 배치)
+    private let sceneCenter: SIMD3<Float>
+    private let sceneRadius: Float
+    private let sceneMinY: Float
+    /// 표면 → 태양 방향 (모델 공간, 정규화)
+    let sunDirection = simd_normalize(SIMD3<Float>(0.45, 1.0, 0.35))
+    static let shadowMapSize = 2048
     private let depthState: MTLDepthStencilState
     private let hizCopyPipeline: MTLComputePipelineState
     private let hizDownsamplePipeline: MTLComputePipelineState
@@ -72,6 +87,8 @@ final class Renderer: NSObject, MTKViewDelegate {
         var scaler: MTLFXSpatialScaler?
         var hiz: MTLTexture
         var hizLevels: [MTLTexture]
+        var aoRaw: MTLTexture
+        var ao: MTLTexture
     }
     private var targets: Targets?
 
@@ -95,6 +112,32 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
         hizCopyPipeline = try device.makeComputePipelineState(function: try function("hizCopyDepth"))
         hizDownsamplePipeline = try device.makeComputePipelineState(function: try function("hizDownsample"))
+        ssaoPipeline = try device.makeComputePipelineState(function: try function("ssaoMain"))
+        ssaoBlurPipeline = try device.makeComputePipelineState(function: try function("ssaoBlur"))
+
+        let shadowDesc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: Self.depthPixelFormat, width: Self.shadowMapSize, height: Self.shadowMapSize, mipmapped: false)
+        shadowDesc.usage = [.renderTarget, .shaderRead]
+        shadowDesc.storageMode = .private
+        guard let shadowMap = device.makeTexture(descriptor: shadowDesc) else { throw Error.meshShadersUnsupported }
+        shadowMap.label = "shadowMap"
+        self.shadowMap = shadowMap
+        shadowUniformBuffers = (0..<Self.maxFramesInFlight).map { i in
+            let b = device.makeBuffer(length: MemoryLayout<Uniforms>.stride, options: .storageModeShared)!
+            b.label = "shadowUniforms[\(i)]"
+            return b
+        }
+        ssaoUniformBuffers = (0..<Self.maxFramesInFlight).map { i in
+            let b = device.makeBuffer(length: MemoryLayout<SSAOUniforms>.stride, options: .storageModeShared)!
+            b.label = "ssaoUniforms[\(i)]"
+            return b
+        }
+        shadowStatsBuffer = device.makeBuffer(length: MemoryLayout<UInt32>.stride * Int(STAT_COUNT), options: .storageModeShared)!
+
+        var minP = SIMD3<Float>(repeating: .greatestFiniteMagnitude), maxP = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
+        for v in mesh.vertices { minP = simd_min(minP, v.position); maxP = simd_max(maxP, v.position) }
+        sceneCenter = (minP + maxP) * 0.5
+        sceneRadius = max(simd_length(maxP - minP) * 0.5, 1e-4)
+        sceneMinY = minP.y
 
         let depthDescriptor = MTLDepthStencilDescriptor()
         depthDescriptor.depthCompareFunction = .less
@@ -163,6 +206,40 @@ final class Renderer: NSObject, MTKViewDelegate {
         return p
     }
 
+    func makeShadowPipeline() throws -> MTLRenderPipelineState {
+        if let p = shadowPipeline { return p }
+        func function(_ name: String) throws -> MTLFunction {
+            guard let f = library.makeFunction(name: name) else { throw Error.functionNotFound(name) }
+            return f
+        }
+        let descriptor = MTLMeshRenderPipelineDescriptor()
+        descriptor.label = "ShadowPipeline"
+        descriptor.objectFunction = try function("objectMain")
+        descriptor.meshFunction = try function("meshMain")
+        descriptor.fragmentFunction = nil   // 깊이 전용
+        descriptor.payloadMemoryLength = MemoryLayout<MeshletPayload>.stride
+        descriptor.maxTotalThreadsPerObjectThreadgroup = Int(OBJECT_THREADS_PER_THREADGROUP)
+        descriptor.maxTotalThreadsPerMeshThreadgroup = Int(MESH_THREADS_PER_THREADGROUP)
+        descriptor.depthAttachmentPixelFormat = Self.depthPixelFormat
+        let p = try device.makeRenderPipelineState(descriptor: descriptor, options: []).0
+        shadowPipeline = p
+        return p
+    }
+
+    private func groundPipeline(sampleCount: Int) throws -> MTLRenderPipelineState {
+        if let p = groundPipelines[sampleCount] { return p }
+        let d = MTLRenderPipelineDescriptor()
+        d.label = "Ground x\(sampleCount)"
+        d.vertexFunction = library.makeFunction(name: "groundVertex")
+        d.fragmentFunction = library.makeFunction(name: "groundFragment")
+        d.colorAttachments[0].pixelFormat = Self.internalColorFormat
+        d.depthAttachmentPixelFormat = Self.depthPixelFormat
+        d.rasterSampleCount = sampleCount
+        let p = try device.makeRenderPipelineState(descriptor: d)
+        groundPipelines[sampleCount] = p
+        return p
+    }
+
     private func presentPipeline(format: MTLPixelFormat) throws -> MTLRenderPipelineState {
         if let p = presentPipelines[format.rawValue] { return p }
         let d = MTLRenderPipelineDescriptor()
@@ -211,6 +288,18 @@ final class Renderer: NSObject, MTKViewDelegate {
         let statsPointer = statsBuffers[slot].contents().bindMemory(to: UInt32.self, capacity: Int(STAT_COUNT))
         for i in 0..<Int(STAT_COUNT) { statsPointer[i] = 0 }
 
+        // 섀도 패스: 라이트 직교 투영으로 깊이만 (같은 LOD 컷, 오클루전 없음)
+        if settings.shadowsEnabled, let shadowPipeline = try? makeShadowPipeline() {
+            writeShadowUniforms(into: shadowUniformBuffers[slot], from: uniformBuffers[slot])
+            let shadowPass = MTLRenderPassDescriptor()
+            shadowPass.depthAttachment.texture = shadowMap
+            shadowPass.depthAttachment.loadAction = .clear
+            shadowPass.depthAttachment.storeAction = .store
+            shadowPass.depthAttachment.clearDepth = 1
+            encodeMeshPass(commandBuffer, descriptor: shadowPass, pipeline: shadowPipeline, uniforms: shadowUniformBuffers[slot],
+                           stats: shadowStatsBuffer, cullPass: UInt32(CULL_PASS_SINGLE), hiz: targets.hiz, drawGround: false, sampleCount: 1, label: "Shadow map")
+        }
+
         // 내부 타깃 패스 서술자
         let first = MTLRenderPassDescriptor()
         if let ms = targets.colorMS {
@@ -239,17 +328,41 @@ final class Renderer: NSObject, MTKViewDelegate {
         let pipeline: MTLRenderPipelineState
         do { pipeline = try meshPipeline(sampleCount: targets.samples) } catch { inflight.signal(); return nil }
 
+        let mainUniforms = uniformBuffers[slot]
         if occlusion {
-            encodeMeshPass(commandBuffer, descriptor: first, pipeline: pipeline, slot: slot, cullPass: UInt32(CULL_PASS_FIRST), hiz: targets.hiz, label: "Pass 1 (prev visible)")
+            encodeMeshPass(commandBuffer, descriptor: first, pipeline: pipeline, uniforms: mainUniforms, stats: statsBuffers[slot],
+                           cullPass: UInt32(CULL_PASS_FIRST), hiz: targets.hiz, drawGround: settings.groundEnabled, sampleCount: targets.samples, label: "Pass 1 (prev visible)")
             encodeHiZBuild(commandBuffer, depth: targets.depth, levels: targets.hizLevels)
             let second = first.copy() as! MTLRenderPassDescriptor
             second.colorAttachments[0].loadAction = .load
             second.depthAttachment.loadAction = .load
             if targets.colorMS != nil { second.colorAttachments[0].storeAction = .multisampleResolve }
-            if targets.depthMS != nil { second.depthAttachment.storeAction = .dontCare }
-            encodeMeshPass(commandBuffer, descriptor: second, pipeline: pipeline, slot: slot, cullPass: UInt32(CULL_PASS_SECOND), hiz: targets.hiz, label: "Pass 2 (Hi-Z tested)")
+            if targets.depthMS != nil { second.depthAttachment.storeAction = .storeAndMultisampleResolve }
+            encodeMeshPass(commandBuffer, descriptor: second, pipeline: pipeline, uniforms: mainUniforms, stats: statsBuffers[slot],
+                           cullPass: UInt32(CULL_PASS_SECOND), hiz: targets.hiz, drawGround: false, sampleCount: targets.samples, label: "Pass 2 (Hi-Z tested)")
         } else {
-            encodeMeshPass(commandBuffer, descriptor: first, pipeline: pipeline, slot: slot, cullPass: UInt32(CULL_PASS_SINGLE), hiz: targets.hiz, label: "Meshlets")
+            encodeMeshPass(commandBuffer, descriptor: first, pipeline: pipeline, uniforms: mainUniforms, stats: statsBuffers[slot],
+                           cullPass: UInt32(CULL_PASS_SINGLE), hiz: targets.hiz, drawGround: settings.groundEnabled, sampleCount: targets.samples, label: "Meshlets")
+        }
+
+        // SSAO (리졸브된 깊이 기준, 렌더 해상도)
+        if settings.ssaoEnabled {
+            writeSSAOUniforms(into: ssaoUniformBuffers[slot], width: targets.renderWidth, height: targets.renderHeight)
+            if let e = commandBuffer.makeComputeCommandEncoder() {
+                e.label = "SSAO"
+                let tg = MTLSize(width: 8, height: 8, depth: 1)
+                let grid = MTLSize(width: (targets.renderWidth + 7) / 8, height: (targets.renderHeight + 7) / 8, depth: 1)
+                e.setComputePipelineState(ssaoPipeline)
+                e.setTexture(targets.depth, index: 0)
+                e.setTexture(targets.aoRaw, index: 1)
+                e.setBuffer(ssaoUniformBuffers[slot], offset: 0, index: 0)
+                e.dispatchThreadgroups(grid, threadsPerThreadgroup: tg)
+                e.setComputePipelineState(ssaoBlurPipeline)
+                e.setTexture(targets.aoRaw, index: 0)
+                e.setTexture(targets.ao, index: 1)
+                e.dispatchThreadgroups(grid, threadsPerThreadgroup: tg)
+                e.endEncoding()
+            }
         }
 
         // 업스케일
@@ -271,6 +384,9 @@ final class Renderer: NSObject, MTKViewDelegate {
             encoder.label = "Present"
             encoder.setRenderPipelineState(presentPipeline)
             encoder.setFragmentTexture(presented, index: 0)
+            encoder.setFragmentTexture(targets.ao, index: 1)
+            var aoStrength: Float = settings.ssaoEnabled ? 1.0 : 0.0
+            encoder.setFragmentBytes(&aoStrength, length: 4, index: 0)
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             encoder.endEncoding()
         }
@@ -306,36 +422,57 @@ final class Renderer: NSObject, MTKViewDelegate {
     }
 
     private func encodeMeshPass(_ commandBuffer: MTLCommandBuffer, descriptor: MTLRenderPassDescriptor, pipeline: MTLRenderPipelineState,
-                                slot: Int, cullPass: UInt32, hiz: MTLTexture, label: String) {
+                                uniforms: MTLBuffer, stats: MTLBuffer, cullPass: UInt32, hiz: MTLTexture, drawGround: Bool, sampleCount: Int, label: String) {
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else { return }
         encoder.label = label
+        let isShadow = descriptor.colorAttachments[0].texture == nil
+
+        // 바닥 (메시렛 앞에 그려 Hi-Z에도 포함)
+        if drawGround, !isShadow, let ground = try? groundPipeline(sampleCount: sampleCount) {
+            encoder.setRenderPipelineState(ground)
+            encoder.setDepthStencilState(depthState)
+            encoder.setCullMode(.none)
+            encoder.setVertexBuffer(uniforms, offset: 0, index: Int(BUFFER_UNIFORMS))
+            encoder.setFragmentBuffer(uniforms, offset: 0, index: Int(BUFFER_UNIFORMS))
+            if let environment { encoder.setFragmentTexture(environment.irradiance, index: Int(TEXTURE_IBL_IRRADIANCE)) }
+            encoder.setFragmentTexture(shadowMap, index: Int(TEXTURE_SHADOW_MAP))
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
+        }
+
         encoder.setRenderPipelineState(pipeline)
         encoder.setDepthStencilState(depthState)
         encoder.setCullMode(.none)
-        encoder.setTriangleFillMode(settings.wireframe ? .lines : .fill)
+        encoder.setTriangleFillMode(settings.wireframe && !isShadow ? .lines : .fill)
+        if isShadow {
+            // 섀도 아크네 완화: 라이트 방향 깊이 바이어스
+            encoder.setDepthBias(1.0, slopeScale: 2.0, clamp: 0.01)
+        }
 
         var pass = cullPass
-        encoder.setObjectBuffer(uniformBuffers[slot], offset: 0, index: Int(BUFFER_UNIFORMS))
+        encoder.setObjectBuffer(uniforms, offset: 0, index: Int(BUFFER_UNIFORMS))
         encoder.setObjectBuffer(gpuMesh.meshlets, offset: 0, index: Int(BUFFER_MESHLETS))
-        encoder.setObjectBuffer(statsBuffers[slot], offset: 0, index: Int(BUFFER_STATS))
+        encoder.setObjectBuffer(stats, offset: 0, index: Int(BUFFER_STATS))
         encoder.setObjectBytes(&pass, length: MemoryLayout<UInt32>.stride, index: Int(BUFFER_CULL_PASS))
         encoder.setObjectBuffer(visibilityBuffer, offset: 0, index: Int(BUFFER_VISIBILITY))
         encoder.setObjectBuffer(lodBuffer, offset: 0, index: Int(BUFFER_MESHLET_LOD))
         encoder.setObjectTexture(hiz, index: Int(TEXTURE_HIZ))
 
-        encoder.setMeshBuffer(uniformBuffers[slot], offset: 0, index: Int(BUFFER_UNIFORMS))
+        encoder.setMeshBuffer(uniforms, offset: 0, index: Int(BUFFER_UNIFORMS))
         encoder.setMeshBuffer(gpuMesh.meshlets, offset: 0, index: Int(BUFFER_MESHLETS))
         encoder.setMeshBuffer(gpuMesh.vertices, offset: 0, index: Int(BUFFER_VERTICES))
         encoder.setMeshBuffer(gpuMesh.meshletVertices, offset: 0, index: Int(BUFFER_MESHLET_VERTICES))
         encoder.setMeshBuffer(gpuMesh.meshletTriangles, offset: 0, index: Int(BUFFER_MESHLET_TRIANGLES))
 
-        encoder.setFragmentBuffer(uniformBuffers[slot], offset: 0, index: Int(BUFFER_UNIFORMS))
-        encoder.setFragmentBuffer(gpuMesh.materials, offset: 0, index: Int(BUFFER_MATERIALS))
-        encoder.useResources(gpuMesh.textures, usage: .read, stages: .fragment)
-        if let environment {
-            encoder.setFragmentTexture(environment.irradiance, index: Int(TEXTURE_IBL_IRRADIANCE))
-            encoder.setFragmentTexture(environment.specular, index: Int(TEXTURE_IBL_SPECULAR))
-            encoder.setFragmentTexture(environment.brdfLUT, index: Int(TEXTURE_IBL_BRDF_LUT))
+        if !isShadow {
+            encoder.setFragmentBuffer(uniforms, offset: 0, index: Int(BUFFER_UNIFORMS))
+            encoder.setFragmentBuffer(gpuMesh.materials, offset: 0, index: Int(BUFFER_MATERIALS))
+            encoder.useResources(gpuMesh.textures, usage: .read, stages: .fragment)
+            if let environment {
+                encoder.setFragmentTexture(environment.irradiance, index: Int(TEXTURE_IBL_IRRADIANCE))
+                encoder.setFragmentTexture(environment.specular, index: Int(TEXTURE_IBL_SPECULAR))
+                encoder.setFragmentTexture(environment.brdfLUT, index: Int(TEXTURE_IBL_BRDF_LUT))
+            }
+            encoder.setFragmentTexture(shadowMap, index: Int(TEXTURE_SHADOW_MAP))
         }
 
         let objectThreads = Int(OBJECT_THREADS_PER_THREADGROUP)
@@ -403,9 +540,11 @@ final class Renderer: NSObject, MTKViewDelegate {
             if scaler == nil || upscaled == nil { scaler = nil; upscaled = nil }
         }
 
+        guard let aoRaw = texture(.r8Unorm, renderWidth, renderHeight, usage: [.shaderRead, .shaderWrite], label: "aoRaw"),
+              let ao = texture(.r8Unorm, renderWidth, renderHeight, usage: [.shaderRead, .shaderWrite], label: "ao") else { return nil }
         let t = Targets(renderWidth: renderWidth, renderHeight: renderHeight, outputWidth: outputWidth, outputHeight: outputHeight,
                         samples: samples, color: color, colorMS: colorMS, depth: depth, depthMS: depthMS,
-                        upscaled: upscaled, scaler: scaler, hiz: hiz, hizLevels: hizLevels)
+                        upscaled: upscaled, scaler: scaler, hiz: hiz, hizLevels: hizLevels, aoRaw: aoRaw, ao: ao)
         targets = t
         stats.renderWidth = renderWidth; stats.renderHeight = renderHeight
         stats.outputWidth = outputWidth; stats.outputHeight = outputHeight
@@ -449,6 +588,31 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
     }
 
+    /// 메인 유니폼을 복사해 라이트 시점으로 바꾼다 (LOD 컷은 메인 카메라 기준 유지)
+    private func writeShadowUniforms(into buffer: MTLBuffer, from main: MTLBuffer) {
+        var u = main.contents().load(as: Uniforms.self)
+        u.modelViewProjection = u.lightViewProjection
+        u.cameraPositionModel = sceneCenter + sunDirection * (sceneRadius * 3)   // 콘 컬링: 라이트 기준 뒷면
+        u.occlusionEnabled = 0
+        let planes = Math.frustumPlanes(from: u.lightViewProjection)
+        withUnsafeMutablePointer(to: &u.frustumPlanes) { tuple in
+            tuple.withMemoryRebound(to: simd_float4.self, capacity: 6) { p in for i in 0..<6 { p[i] = planes[i] } }
+        }
+        buffer.contents().copyMemory(from: &u, byteCount: MemoryLayout<Uniforms>.stride)
+    }
+
+    private func writeSSAOUniforms(into buffer: MTLBuffer, width: Int, height: Int) {
+        var u = SSAOUniforms()
+        u.projection = camera.projectionMatrix
+        u.inverseProjection = simd_inverse(camera.projectionMatrix)
+        u.screenSize = SIMD2(Float(width), Float(height))
+        u.radius = sceneRadius * 0.06
+        u.bias = sceneRadius * 0.0015
+        u.intensity = 1.1
+        u.frameIndex = UInt32(frameIndex)
+        buffer.contents().copyMemory(from: &u, byteCount: MemoryLayout<SSAOUniforms>.stride)
+    }
+
     private func writeUniforms(into buffer: MTLBuffer, occlusion: Bool, renderHeight: Int) {
         let view = camera.viewMatrix
         let projection = camera.projectionMatrix
@@ -475,6 +639,21 @@ final class Renderer: NSObject, MTKViewDelegate {
             u.hizSize = SIMD2(UInt32(t.hiz.width), UInt32(t.hiz.height))
             u.hizMipCount = UInt32(t.hiz.mipmapLevelCount)
         }
+        u.lodCameraPositionModel = camera.position
+        // 태양: 모델 경계 구를 덮는 직교 프러스텀
+        let lightEye = sceneCenter + sunDirection * (sceneRadius * 3)
+        let up: SIMD3<Float> = abs(sunDirection.y) > 0.99 ? SIMD3(1, 0, 0) : SIMD3(0, 1, 0)
+        let lightView = Math.lookAt(eye: lightEye, target: sceneCenter, up: up)
+        let lightProjection = Math.orthographic(left: -sceneRadius, right: sceneRadius, bottom: -sceneRadius, top: sceneRadius,
+                                                near: sceneRadius * 1.5, far: sceneRadius * 4.5)
+        u.lightViewProjection = lightProjection * lightView
+        u.lightDirectionView = simd_normalize(Math.upperLeft3x3(view) * sunDirection)
+        u.sunIntensity = settings.iblEnabled && environment != nil ? 1.6 : 0
+        u.shadowsEnabled = settings.shadowsEnabled ? 1 : 0
+        u.shadowBias = 0.0015
+        u.groundY = sceneMinY - sceneRadius * 0.002
+        u.groundRadius = sceneRadius * 8
+        u.groundEnabled = settings.groundEnabled ? 1 : 0
         let planes = Math.frustumPlanes(from: viewProjection)
         withUnsafeMutablePointer(to: &u.frustumPlanes) { tuple in
             tuple.withMemoryRebound(to: simd_float4.self, capacity: 6) { p in

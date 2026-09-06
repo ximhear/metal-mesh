@@ -174,7 +174,10 @@ xcodebuild -project MetalMesh.xcodeproj -scheme MetalMesh -destination 'platform
   MSAA 깊이는 max 리졸브해 Hi-Z 입력. 오클루전 2패스에서는 1패스 MS 컬러를 store, 2패스에서 resolve(1패스에서 resolve하면 2패스가 쓰레기를 로드).
   MTKView는 깊이 없음. 테스트 65개
 - [ ] MetalFX 시간적 업스케일러 (모션 벡터 렌더 타깃 + 지터, 실기기 검증 필요)
-- [ ] 그림자(섀도 맵), SSAO
+- [x] **섀도 맵 + SSAO + 바닥** (2026-09-06): 태양 방향광 직교 섀도 맵 2048² (fragment nil 메시 파이프라인, 깊이 바이어스, PCF 3×3),
+  바닥 원판(그림자·IBL 조도, 가장자리 페이드), SSAO 컴퓨트(깊이 재구성 노멀, 16 샘플 나선, 4×4 블러) → 프레젠트에서 곱.
+  Uniforms에 lodCameraPositionModel 분리(섀도 패스도 메인 카메라 LOD 컷). 테스트 66개
+  메모: 기하·컬링 테스트는 바닥/그림자/SSAO를 꺼야 커버리지·색 기대치가 맞는다 (`plain(renderer)`)
 - 메모: Hi-Z 밉 레벨은 `ceil(log2(사각형 px)) - 1`에서 3×3 샘플. 귀퉁이 4개만 읽으면 텍셀이 사각형의 2배까지 커져 배경 깊이를 포함해 컬링이 거의 안 됨
 
 ### Phase 5 — 마무리
