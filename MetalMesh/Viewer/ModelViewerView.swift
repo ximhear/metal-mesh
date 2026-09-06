@@ -14,6 +14,8 @@ final class ViewerStatsModel {
     var textureCount = 0
     var visibleMeshletCount = 0
     var occludedMeshletCount = 0
+    var drawnTriangleCount = 0
+    var lodLevelCount = 1
     var gpuTime: Double = 0
 
     func apply(_ stats: RenderStats) {
@@ -25,12 +27,15 @@ final class ViewerStatsModel {
         if textureCount != stats.textureCount { textureCount = stats.textureCount }
         if visibleMeshletCount != stats.visibleMeshletCount { visibleMeshletCount = stats.visibleMeshletCount }
         if occludedMeshletCount != stats.occludedMeshletCount { occludedMeshletCount = stats.occludedMeshletCount }
+        if drawnTriangleCount != stats.drawnTriangleCount { drawnTriangleCount = stats.drawnTriangleCount }
+        if lodLevelCount != stats.lodLevelCount { lodLevelCount = stats.lodLevelCount }
         if gpuTime != stats.gpuTime { gpuTime = stats.gpuTime }
     }
 
     var snapshot: RenderStats {
         RenderStats(meshletCount: meshletCount, visibleMeshletCount: visibleMeshletCount, occludedMeshletCount: occludedMeshletCount,
-                    triangleCount: triangleCount, vertexCount: vertexCount, materialCount: materialCount, textureCount: textureCount, gpuTime: gpuTime)
+                    triangleCount: triangleCount, drawnTriangleCount: drawnTriangleCount, lodLevelCount: lodLevelCount,
+                    vertexCount: vertexCount, materialCount: materialCount, textureCount: textureCount, gpuTime: gpuTime)
     }
 }
 
@@ -91,6 +96,12 @@ struct ModelViewerView: View {
                 Toggle(isOn: $settings.texturesEnabled) { Label("텍스처", systemImage: "photo") }
                     .disabled(stats.textureCount == 0)
                 Toggle(isOn: $settings.iblEnabled) { Label("환경광", systemImage: "sun.max") }
+                Toggle(isOn: $settings.lodEnabled) { Label("LOD", systemImage: "square.3.layers.3d") }
+                    .disabled(stats.lodLevelCount <= 1)
+                Picker("LOD 오차", selection: $settings.lodThresholdPx) {
+                    ForEach([0.5, 1, 2, 4, 8] as [Float], id: \.self) { Text("\($0.formatted()) px").tag($0) }
+                }
+                .disabled(!settings.lodEnabled || stats.lodLevelCount <= 1)
                 infoButton
             }
             #else
@@ -108,6 +119,14 @@ struct ModelViewerView: View {
                     Toggle(isOn: $settings.texturesEnabled) { Label("텍스처", systemImage: "photo") }
                         .disabled(stats.textureCount == 0)
                     Toggle(isOn: $settings.iblEnabled) { Label("환경광 (IBL)", systemImage: "sun.max") }
+                    Divider()
+                    Toggle(isOn: $settings.lodEnabled) { Label("클러스터 LOD", systemImage: "square.3.layers.3d") }
+                        .disabled(stats.lodLevelCount <= 1)
+                    Picker("LOD 허용 오차", selection: $settings.lodThresholdPx) {
+                        ForEach([0.5, 1, 2, 4, 8] as [Float], id: \.self) { Text("\($0.formatted()) px").tag($0) }
+                    }
+                    .pickerStyle(.menu)
+                    .disabled(!settings.lodEnabled || stats.lodLevelCount <= 1)
                 } label: {
                     Label("표시 옵션", systemImage: "slider.horizontal.3")
                 }
@@ -142,8 +161,8 @@ struct ModelViewerView: View {
         do {
             state = .loading("파일 읽는 중…")
             let mesh = try await ModelLoader.load(url: url)
-            state = .loading("메시렛 생성 중… (\(mesh.triangleCount.formatted()) 삼각형)")
-            let meshlets = await Task.detached(priority: .userInitiated) { MeshletBuilder.build(mesh) }.value
+            state = .loading("메시렛·LOD 생성 중… (\(mesh.triangleCount.formatted()) 삼각형)")
+            let meshlets = await Task.detached(priority: .userInitiated) { MeshletLODBuilder.build(mesh) }.value
             let renderer = try Renderer(device: device, mesh: meshlets, materials: mesh.materials)
             renderer.camera.frame(center: mesh.boundsCenter, radius: mesh.boundsRadius)
             renderer.settings = settings
@@ -164,7 +183,9 @@ private struct StatsBar: View {
         HStack(spacing: 14) {
             item("메시렛", "\(stats.visibleMeshletCount.formatted()) / \(stats.meshletCount.formatted())")
             if stats.occludedMeshletCount > 0 { item("가림", stats.occludedMeshletCount.formatted()) }
-            item("삼각형", stats.triangleCount.formatted())
+            item("삼각형", stats.lodLevelCount > 1
+                 ? "\(stats.drawnTriangleCount.formatted()) / \(stats.triangleCount.formatted())"
+                 : stats.triangleCount.formatted())
             item("GPU", String(format: "%.2f ms", stats.gpuTime * 1000))
         }
         .font(.caption.monospacedDigit())
@@ -201,6 +222,7 @@ private struct ModelInfoView: View {
                     LabeledContent("정점", value: stats.vertexCount.formatted())
                     LabeledContent("삼각형", value: stats.triangleCount.formatted())
                     LabeledContent("메시렛", value: stats.meshletCount.formatted())
+                    LabeledContent("LOD 단계", value: "\(stats.lodLevelCount)")
                     LabeledContent("재질 / 텍스처", value: "\(stats.materialCount) / \(stats.textureCount)")
                     LabeledContent("메시렛 한계", value: "정점 \(MESHLET_MAX_VERTICES) · 삼각형 \(MESHLET_MAX_TRIANGLES)")
                 }

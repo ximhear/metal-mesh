@@ -36,6 +36,22 @@ typedef struct {
     unsigned short triangleCount; // 62
 } Meshlet;
 
+/// 메시렛 LOD 정보 (메시렛과 같은 인덱스). 80바이트 (float3 정렬).
+/// 그룹 단위 단순화 계층: 자식 메시렛의 parent{Center,Radius,Error}는 부모 메시렛의 {center,radius,error}와 같은 값이라
+/// "자기 오차 ≤ 임계값 < 부모 오차" 조건이 계층 전체에서 정확히 하나의 컷을 고른다.
+typedef struct {
+    simd_float3  center;         // 0   자기 그룹 경계 구 (LOD0은 메시렛 자체)
+    float        radius;         // 16
+    simd_float3  parentCenter;   // 32
+    float        parentRadius;   // 48
+    float        error;          // 52  모델 단위 기하 오차 (LOD0은 0)
+    float        parentError;    // 56  LOD_ERROR_INFINITE면 루트(더 거친 단계 없음)
+    unsigned int level;          // 60
+    unsigned int padding;        // 64
+} MeshletLOD;
+
+#define LOD_ERROR_INFINITE 1.0e30f
+
 /// 프레임 유니폼. 모델 행렬은 단위행렬로 두고 카메라만 움직인다(모델 공간 == 월드 공간).
 typedef struct {
     simd_float4x4 modelViewProjection;
@@ -54,7 +70,10 @@ typedef struct {
     float         exposure;
     float         envSpecularMipCount; // 프리필터 스펙큘러 큐브맵 밉 수
     unsigned int  iblEnabled;
-    unsigned int  padding2;
+    unsigned int  lodEnabled;          // 0이면 LOD0만 그린다
+    float         lodThresholdPx;      // 허용 화면 오차 (픽셀)
+    float         lodScale;            // viewportHeight / (2 tan(fov/2)) : 모델 단위 오차 → 픽셀
+    unsigned int  padding2[2];
 } Uniforms;
 
 /// 컬링 패스 종류 (object 스테이지 setObjectBytes로 전달)
@@ -65,7 +84,8 @@ typedef struct {
 /// 통계 버퍼 레이아웃 (atomic uint)
 #define STAT_DRAWN    0      // 이 프레임에 그린 메시렛 수 (두 패스 합)
 #define STAT_OCCLUDED 1      // Hi-Z 테스트로 제거된 메시렛 수
-#define STAT_COUNT    2
+#define STAT_TRIANGLES 2     // 그린 삼각형 수
+#define STAT_COUNT    3
 
 /// 재질(metallic-roughness PBR). Metal 3 인자 버퍼(tier 2)에 그대로 놓인다. 80바이트.
 /// MSL에서는 texture2d가 8바이트 리소스 ID로 저장되므로 C 쪽은 MTLResourceID와 같은 8바이트로 맞춘다.
@@ -111,6 +131,7 @@ typedef struct {
 #define BUFFER_STATS             2   // object 전용: atomic uint[STAT_COUNT]
 #define BUFFER_CULL_PASS         3   // object 전용: uint (CULL_PASS_*)
 #define BUFFER_VISIBILITY        4   // object 전용: uint[meshletCount], 지난 프레임 가시성
+#define BUFFER_MESHLET_LOD       5   // object 전용: MeshletLOD[meshletCount]
 #define TEXTURE_HIZ              0   // object 전용: r32Float 밉 피라미드 (max depth)
 #define BUFFER_VERTICES          2   // mesh 전용
 #define BUFFER_MESHLET_VERTICES  3

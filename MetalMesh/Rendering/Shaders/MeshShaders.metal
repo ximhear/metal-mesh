@@ -57,6 +57,23 @@ static bool occludedByHiZ(constant Uniforms& u, texture2d<float> hiz, float3 cen
     return minDepth > d;   // 구의 가장 가까운 점이 그 영역의 가장 먼 가림막보다 뒤에 있다
 }
 
+/// 모델 단위 오차를 화면 픽셀 오차로 (경계 구 표면까지의 거리 기준, 보수적)
+static float projectedError(constant Uniforms& u, float3 center, float radius, float error) {
+    if (error >= LOD_ERROR_INFINITE) return INFINITY;
+    float dist = length(center - u.cameraPositionModel) - radius;
+    if (dist <= 1e-6) return INFINITY;   // 카메라가 구 안 → 이 단계는 너무 거칠다
+    return error * u.lodScale / dist;
+}
+
+/// Nanite식 컷 조건: 자기 오차는 허용치 이하, 부모 오차는 허용치 초과
+static bool lodSelected(constant Uniforms& u, MeshletLOD lod) {
+    if (u.lodEnabled == 0u) return lod.level == 0u;
+    float selfErr = lod.error == 0.0 ? 0.0 : projectedError(u, lod.center, lod.radius, lod.error);
+    if (selfErr > u.lodThresholdPx) return false;
+    float parentErr = projectedError(u, lod.parentCenter, lod.parentRadius, lod.parentError);
+    return parentErr > u.lodThresholdPx;
+}
+
 [[object, max_total_threads_per_threadgroup(OBJECT_THREADS_PER_THREADGROUP),
           max_total_threadgroups_per_mesh_grid(OBJECT_THREADS_PER_THREADGROUP)]]
 void objectMain(object_data MeshletPayload& payload [[payload]],
@@ -66,23 +83,29 @@ void objectMain(object_data MeshletPayload& payload [[payload]],
                 device atomic_uint* stats           [[buffer(BUFFER_STATS)]],
                 constant uint& cullPass             [[buffer(BUFFER_CULL_PASS)]],
                 device uint* visibility             [[buffer(BUFFER_VISIBILITY)]],
+                const device MeshletLOD* lods       [[buffer(BUFFER_MESHLET_LOD)]],
                 texture2d<float> hiz                [[texture(TEXTURE_HIZ)]],
                 uint tid [[thread_index_in_threadgroup]],
                 uint gid [[thread_position_in_grid]])
 {
     threadgroup atomic_uint count;
     threadgroup atomic_uint occluded;
+    threadgroup atomic_uint triangles;
     if (tid == 0) {
         atomic_store_explicit(&count, 0u, memory_order_relaxed);
         atomic_store_explicit(&occluded, 0u, memory_order_relaxed);
+        atomic_store_explicit(&triangles, 0u, memory_order_relaxed);
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
     bool draw = false;
+    uint triangleCount = 0;
     if (gid < u.meshletCount) {
         Meshlet m = meshlets[gid];
-        bool inView = true;
-        if (u.cullingEnabled) {
+        triangleCount = m.triangleCount;
+        // LOD 컷에 속하지 않는 메시렛은 프러스텀 밖과 같이 취급한다
+        bool inView = lodSelected(u, lods[gid]);
+        if (inView && u.cullingEnabled) {
             inView = insideFrustum(u, m.boundsCenter, m.boundsRadius) && !coneBackfacing(u, m);
         }
         switch (cullPass) {
@@ -106,15 +129,18 @@ void objectMain(object_data MeshletPayload& payload [[payload]],
     if (draw) {
         uint slot = atomic_fetch_add_explicit(&count, 1u, memory_order_relaxed);
         payload.meshletIndices[slot] = gid;
+        atomic_fetch_add_explicit(&triangles, triangleCount, memory_order_relaxed);
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
     if (tid == 0) {
         uint total = atomic_load_explicit(&count, memory_order_relaxed);
         uint occ = atomic_load_explicit(&occluded, memory_order_relaxed);
+        uint tris = atomic_load_explicit(&triangles, memory_order_relaxed);
         grid.set_threadgroups_per_grid(uint3(total, 1, 1));
         if (total > 0) atomic_fetch_add_explicit(&stats[STAT_DRAWN], total, memory_order_relaxed);
         if (occ > 0) atomic_fetch_add_explicit(&stats[STAT_OCCLUDED], occ, memory_order_relaxed);
+        if (tris > 0) atomic_fetch_add_explicit(&stats[STAT_TRIANGLES], tris, memory_order_relaxed);
     }
 }
 

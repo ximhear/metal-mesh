@@ -299,6 +299,48 @@ struct RendererTests {
         #expect(ratio < 0.002, "오클루전은 보이는 픽셀을 바꾸면 안 된다 (다른 픽셀 비율 \(ratio))")
     }
 
+    @Test func lodDrawsFewerTrianglesFarAwayAndMatchesNearby() async throws {
+        let device = try #require(self.device)
+        let samples = try #require(Bundle.main.url(forResource: "Samples", withExtension: nil))
+        let mesh = try await ModelLoader.load(url: samples.appendingPathComponent("stanford-bunny/stanford-bunny.obj"))
+        let lodMesh = MeshletLODBuilder.build(mesh)
+        let renderer = try Renderer(device: device, mesh: lodMesh, materials: mesh.materials)
+        renderer.settings.cullingEnabled = false
+        renderer.settings.occlusionEnabled = false
+        renderer.camera.frame(center: mesh.boundsCenter, radius: mesh.boundsRadius)
+        let target = try makeTarget(device: device, size: 256)
+        func pixels() -> [UInt8] {
+            var px = [UInt8](repeating: 0, count: target.size * target.size * 4)
+            target.color.getBytes(&px, bytesPerRow: target.size * 4, from: MTLRegionMake2D(0, 0, target.size, target.size), mipmapLevel: 0)
+            return px
+        }
+        // 가까이: LOD 켬/끔 이미지가 거의 같아야 한다 (허용 오차 0.5px)
+        renderer.settings.lodEnabled = false
+        renderer.renderFrame(passDescriptor: target.pass, drawable: nil, waitUntilCompleted: true)
+        let lod0Tris = renderer.stats.drawnTriangleCount
+        let reference = pixels()
+        #expect(lod0Tris == mesh.triangleCount)
+
+        renderer.settings.lodEnabled = true
+        renderer.settings.lodThresholdPx = 0.5
+        renderer.renderFrame(passDescriptor: target.pass, drawable: nil, waitUntilCompleted: true)
+        let nearTris = renderer.stats.drawnTriangleCount
+        let near = pixels()
+        var differing = 0
+        for i in stride(from: 0, to: reference.count, by: 4) where abs(Int(reference[i]) - Int(near[i])) > 8 || abs(Int(reference[i + 1]) - Int(near[i + 1])) > 8 { differing += 1 }
+        let ratio = Double(differing) / Double(target.size * target.size)
+        #expect(ratio < 0.02, "가까운 거리 LOD 이미지 차이 \(ratio)")
+        #expect(nearTris <= lod0Tris)
+
+        // 멀리: 삼각형이 크게 줄어야 한다
+        renderer.camera.zoom(factor: 1 / 8)
+        renderer.renderFrame(passDescriptor: target.pass, drawable: nil, waitUntilCompleted: true)
+        let farTris = renderer.stats.drawnTriangleCount
+        #expect(farTris < lod0Tris / 4, "멀리서 \(farTris) vs 원본 \(lod0Tris)")
+        #expect(farTris > 0)
+        print("LOD render: lod0=\(lod0Tris) near=\(nearTris) far(8x)=\(farTris) levels=\(lodMesh.lodLevelCount)")
+    }
+
     @Test func frustumPlanesContainCameraTarget() {
         let camera = OrbitCamera()
         camera.frame(center: SIMD3(1, 2, 3), radius: 2)

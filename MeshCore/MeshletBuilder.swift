@@ -9,8 +9,33 @@ public struct MeshletMesh: Sendable {
     public var meshletVertices: [UInt32]
     /// 메시렛 로컬 인덱스 (0..<vertexCount), 삼각형당 3개
     public var meshletTriangles: [UInt8]
+    /// 메시렛별 LOD 정보 (비어 있으면 LOD 없음 = 전부 레벨 0)
+    public var lod: [MeshletLOD] = []
 
+    public init(vertices: [Vertex], meshlets: [Meshlet], meshletVertices: [UInt32], meshletTriangles: [UInt8], lod: [MeshletLOD] = []) {
+        self.vertices = vertices; self.meshlets = meshlets; self.meshletVertices = meshletVertices
+        self.meshletTriangles = meshletTriangles; self.lod = lod
+    }
+
+    /// 전체 삼각형 수 (모든 LOD 레벨 합)
     public var triangleCount: Int { meshlets.reduce(0) { $0 + Int($1.triangleCount) } }
+    /// 레벨 0 삼각형 수 (원본)
+    public var level0TriangleCount: Int {
+        guard !lod.isEmpty else { return triangleCount }
+        return zip(meshlets, lod).reduce(0) { $0 + ($1.1.level == 0 ? Int($1.0.triangleCount) : 0) }
+    }
+    public var lodLevelCount: Int { lod.isEmpty ? 1 : Int((lod.map(\.level).max() ?? 0) + 1) }
+
+    /// 메시렛 `i`의 삼각형들을 전역 정점 인덱스 삼중으로 돌려준다
+    public func triangles(ofMeshlet i: Int) -> [UInt32] {
+        let m = meshlets[i]
+        var out = [UInt32](); out.reserveCapacity(Int(m.triangleCount) * 3)
+        let base = Int(m.triangleOffset)
+        for k in 0..<(Int(m.triangleCount) * 3) {
+            out.append(meshletVertices[Int(m.vertexOffset) + Int(meshletTriangles[base + k])])
+        }
+        return out
+    }
 }
 
 /// 삼각형을 메시렛으로 묶는다. 메시렛은 재질 하나만 갖는다.

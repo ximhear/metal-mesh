@@ -23,6 +23,8 @@ mesh 스테이지가 살아남은 메시렛만 삼각형으로 펼칩니다.
   항목별 썸네일(오프스크린 렌더, Documents/Thumbnails에 PNG 캐시)
 - **뷰어** 화면: 트랙볼 카메라(회전/줌/팬, 짐벌 락 없음), 표시 모드(셰이딩·메시렛 색·노멀), 컬링·오클루전·와이어프레임·텍스처 토글, 라이선스 정보 시트
 - **메시렛 컬링 3단**: 프러스텀(경계 구) → 노멀 콘(뒷면) → 2패스 Hi-Z 오클루전. 하단 통계 바에 그린/전체/가림 수와 GPU 시간 표시
+- **클러스터 LOD (Nanite식)**: 메시렛 그룹을 경계를 잠근 채 쿼드릭 단순화해 계층을 만들고, object 스테이지가 화면 오차 기준으로
+  크랙 없는 컷을 고른다. 허용 오차(0.5~8px) 선택, 그린 삼각형 / 원본 삼각형 표시
 - **PBR(metallic-roughness) + IBL**: baseColor·노멀·러프니스·메탈릭 맵을 OBJ(.mtl), USDC, USDZ(내장), glTF 재질에서 추출.
   HDRI(Poly Haven CC0)로 조도 큐브맵·GGX 프리필터 스펙큘러·BRDF LUT를 시작 시 컴퓨트로 생성해 Cook-Torrance 셰이딩, ACES 톤매핑.
   서브메시별 재질을 메시렛 단위로 유지하고 Metal 3 인자 버퍼(`MTLResourceID`)로 프래그먼트에서 직접 샘플링
@@ -55,6 +57,26 @@ Swift와 MSL은 `MeshCore/include/ShaderTypes.h` 한 파일에서 `Vertex`, `Mes
 메시 처리 코드(로더, 메시렛 빌더, 수학)는 **MeshCore 프레임워크**로 분리되어 Debug 구성에서도 `-O`로 빌드됩니다.
 `-Onone`에서는 클러스터링이 약 50배 느려(bunny 2.1s vs 40ms) 뷰어 로딩과 썸네일 생성이 체감될 정도로 지연되기 때문입니다.
 앱 본체는 `-Onone`이라 그대로 디버깅할 수 있습니다.
+
+### 클러스터 LOD
+
+```
+빌드 (MeshletLODBuilder, CPU)
+  레벨 L 메시렛을 정점 공유가 많은 인접 ≤4개로 그룹화(같은 재질)
+  그룹 경계 정점(다른 그룹과 공유) + 메시 외곽 정점을 잠금
+  MeshSimplifier: 쿼드릭 하프에지 붕괴(기존 정점으로만 → UV·노멀 유지), 링크 조건, 뒤집힘 검사, 잠긴 정점 보호
+  삼각형 절반으로 → 다시 메시렛으로 → 레벨 L+1. 줄지 않는 그룹은 루트
+  그룹의 (경계 구, 오차)를 자식의 parent 와 새 메시렛의 self 에 똑같이 기록 (오차는 max(단순화 오차, 자식 오차)로 단조)
+런타임 (object 셰이더)
+  projected(e) = e · viewportHeight / (2 tan(fov/2)) / (거리 − 반지름)
+  그리기 = projected(self) ≤ 임계값 < projected(parent)    // 계층에서 정확히 하나의 컷
+```
+
+Stanford Bunny: 7단계, 69,451 → 34,530 → 17,110 → 9,146 → 4,871 → 1,579 → 277 삼각형, 빌드 310ms (-O).
+
+| LOD0 | 자동 LOD (2px) | 메시렛 색 |
+|---|---|---|
+| ![LOD0](docs/images/bunny-lod0-wire.png) | ![LOD](docs/images/bunny-lod-wire.png) | ![LOD meshlets](docs/images/bunny-lod-meshlets.png) |
 
 ### 2패스 Hi-Z 오클루전 컬링
 
@@ -98,7 +120,7 @@ open MetalMesh.xcodeproj
 명령줄:
 
 ```bash
-# macOS 빌드 + 테스트 (59개)
+# macOS 빌드 + 테스트 (64개)
 xcodebuild -project MetalMesh.xcodeproj -scheme MetalMesh -destination 'platform=macOS' \
   -derivedDataPath build/DerivedData test
 
@@ -127,6 +149,8 @@ MeshCore/                       메시 처리 프레임워크 (Debug에서도 -O
   ModelLoader, GLBLoader        Model I/O 로더 / 자체 glTF 로더 → MeshData
   MeshPostProcess               정점 용접, 스무스 노멀
   MeshletBuilder                클러스터·스캔 전략, 경계 구·노멀 콘
+  MeshletLODBuilder             그룹화 → 단순화 → 재클러스터 계층, MeshletLOD(자기/부모 오차·경계 구)
+  MeshSimplifier                쿼드릭 하프에지 붕괴 단순화 (잠금, 링크 조건)
   ModelProbe, ModelIOQueue      통계 프로브, Model I/O 직렬화 액터
   Math                          투영/lookAt/프러스텀 평면
 MetalMesh/
@@ -136,7 +160,7 @@ MetalMesh/
   Resources/Environment/        HDRI (Poly Haven studio_small_09, CC0)
   Viewer/                       ModelViewerView, MetalView(제스처), OrbitCamera
   Resources/Samples/            번들 샘플 모델 + 폴더별 LICENSE.txt + MODELS.md
-Tests/                          Swift Testing 59개 (레이아웃, 라이브러리, 썸네일, 로더·재질, glTF, 메시렛, 오프스크린 렌더)
+Tests/                          Swift Testing 64개 (레이아웃, 라이브러리, 썸네일, 로더·재질, glTF, 메시렛, 오프스크린 렌더)
 scripts/probe-model.swift       Model I/O 로드 검증 CLI
 scripts/bench-meshlets.swift    메시렛 빌더 벤치마크 (-O CLI)
 .claude/skills/fetch-3d-model/  무료 소스(Poly Haven, Sketchfab, Poly Pizza, GitHub 테스트 메시)에서 모델을 받는 절차
@@ -166,7 +190,7 @@ PLAN.md                         단계별 계획과 진행 상태
 - [x] 메시렛 클러스터링 품질 개선(meshoptimizer 방식)
 - [x] 2패스 Hi-Z 오클루전 컬링
 - [x] PBR + IBL, 노멀 매핑
-- [ ] 클러스터 LOD (Nanite식)
+- [x] 클러스터 LOD (Nanite식)
 - [ ] MetalFX 업스케일링, MSAA
 - [ ] 그림자, SSAO
 - [ ] iPhone/iPad 실기기 성능 측정

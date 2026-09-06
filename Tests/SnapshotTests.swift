@@ -16,6 +16,8 @@ struct SnapshotTests {
         var yaw: Float = 0.6
         var pitch: Float = 0.35
         var zoom: Float = 1
+        var lod: Bool = false
+        var lodThreshold: Float = 1
     }
 
     static let shots: [Shot] = [
@@ -31,6 +33,11 @@ struct SnapshotTests {
         Shot(file: "Duck/Duck.glb", name: "duck-glb", mode: .shaded, yaw: 0.9, pitch: 0.3),
         Shot(file: "Avocado/Avocado.glb", name: "avocado-glb", mode: .shaded, yaw: 0.6, pitch: 0.3),
         Shot(file: "polypizza-bunny/polypizza-bunny.glb", name: "polypizza-bunny-glb", mode: .shaded, yaw: 0.7, pitch: 0.3),
+        // 클러스터 LOD: 같은 거리에서 LOD0 대 자동 선택 (와이어프레임으로 삼각형 밀도 비교)
+        Shot(file: "stanford-bunny/stanford-bunny.obj", name: "bunny-lod0-wire", mode: .shaded, wireframe: true, zoom: 1.6, lod: false),
+        Shot(file: "stanford-bunny/stanford-bunny.obj", name: "bunny-lod-wire", mode: .shaded, wireframe: true, zoom: 1.6, lod: true, lodThreshold: 2),
+        Shot(file: "stanford-bunny/stanford-bunny.obj", name: "bunny-lod-meshlets", mode: .meshlets, zoom: 1.6, lod: true, lodThreshold: 2),
+        Shot(file: "xyzrgb_dragon/xyzrgb_dragon.obj", name: "dragon-lod-wire", mode: .shaded, wireframe: true, yaw: 1.2, pitch: 0.2, zoom: 1.6, lod: true, lodThreshold: 2),
     ]
 
     @Test func snapshotProducesImage() throws {
@@ -58,17 +65,21 @@ struct SnapshotTests {
 
         for shot in Self.shots {
             let mesh = try await ModelLoader.load(url: samples.appendingPathComponent(shot.file))
-            let renderer = try Renderer(device: device, mesh: MeshletBuilder.build(mesh), materials: mesh.materials)
+            let meshlets = shot.lod ? MeshletLODBuilder.build(mesh) : MeshletBuilder.build(mesh)
+            let renderer = try Renderer(device: device, mesh: meshlets, materials: mesh.materials)
             renderer.camera.frame(center: mesh.boundsCenter, radius: mesh.boundsRadius)
             renderer.camera.yaw = shot.yaw
             renderer.camera.pitch = shot.pitch
             renderer.camera.zoom(factor: shot.zoom)
-            renderer.settings = RenderSettings(debugMode: shot.mode, cullingEnabled: true, wireframe: shot.wireframe)
+            var settings = RenderSettings(debugMode: shot.mode, cullingEnabled: true, wireframe: shot.wireframe)
+            settings.lodEnabled = shot.lod
+            settings.lodThresholdPx = shot.lodThreshold
+            renderer.settings = settings
             let image = try #require(renderer.snapshot(width: 1200, height: 900))
             let png = try #require(Renderer.pngData(image))
             let url = outDir.appendingPathComponent("\(shot.name).png")
             try png.write(to: url)
-            print("SNAPSHOT \(url.path) visible=\(renderer.stats.visibleMeshletCount)/\(renderer.stats.meshletCount) tris=\(mesh.triangleCount) verts=\(mesh.vertices.count) textures=\(renderer.stats.textureCount)")
+            print("SNAPSHOT \(url.path) visible=\(renderer.stats.visibleMeshletCount)/\(renderer.stats.meshletCount) tris=\(mesh.triangleCount) drawnTris=\(renderer.stats.drawnTriangleCount) verts=\(mesh.vertices.count) textures=\(renderer.stats.textureCount) lodLevels=\(renderer.stats.lodLevelCount)")
         }
     }
 }

@@ -165,7 +165,11 @@ xcodebuild -project MetalMesh.xcodeproj -scheme MetalMesh -destination 'platform
 - [x] **PBR + IBL** (2026-09-06): Vertex에 탄젠트(64B), Material 80B(텍스처 4장 + 계수), 로더 재질 확장(USD semantic + Poly Haven 이웃 파일 규칙, glTF MR/normal),
   `IBLEnvironment`(HDRI→큐브맵→조도/GGX 프리필터/BRDF LUT 컴퓨트, 디바이스당 1회), Cook-Torrance + split-sum IBL + ACES. 환경광 토글, 방향광 폴백.
   EXR 노멀 맵은 ImageIO 디코딩 실패 → PNG로 교체. 테스트 59개
-- [ ] 클러스터 LOD (메시렛 그룹 단순화 DAG, 화면 오차 기준 GPU 선택)
+- [x] **클러스터 LOD** (2026-09-06): MeshSimplifier(쿼드릭 하프에지, 링크 조건, 잠금 보호, 면적 정규화 RMS 오차),
+  MeshletLODBuilder(그룹 ≤4, 경계·외곽 잠금, 레벨 반복, 그룹 (구, 오차) 공유), MeshletLOD 80B, object 셰이더 컷 선택,
+  LOD 토글/허용 오차 UI, 그린 삼각형 통계. bunny 7단계 310ms. 테스트 64개
+  메모: 오차를 면적 가중 쿼드릭 제곱근으로 보고하면 값이 너무 작아 항상 최상위가 선택됨 → 누적 면적으로 정규화한 RMS 거리 사용.
+  잠긴 정점은 붕괴로 삼각형이 0개가 되지 않도록 보호해야 구멍이 안 생김
 - [ ] MetalFX 업스케일링, MSAA
 - [ ] 그림자(섀도 맵), SSAO
 - 메모: Hi-Z 밉 레벨은 `ceil(log2(사각형 px)) - 1`에서 3×3 샘플. 귀퉁이 4개만 읽으면 텍셀이 사각형의 2배까지 커져 배경 깊이를 포함해 컬링이 거의 안 됨

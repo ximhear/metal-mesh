@@ -25,6 +25,10 @@ struct RenderSettings: Equatable {
     /// 이미지 기반 조명 (환경맵). 끄면 방향광 2개로 셰이딩
     var iblEnabled = true
     var exposure: Float = 1.0
+    /// 클러스터 LOD (계층이 있을 때). 끄면 LOD0만
+    var lodEnabled = true
+    /// 허용 화면 오차 (픽셀)
+    var lodThresholdPx: Float = 1.0
 }
 
 /// 렌더러가 프레임마다 채우는 통계. 메인 스레드에서 갱신된다.
@@ -33,7 +37,11 @@ struct RenderStats: Equatable {
     var visibleMeshletCount = 0
     /// Hi-Z 테스트로 제거된 메시렛 수 (오클루전 켜진 경우)
     var occludedMeshletCount = 0
+    /// LOD0(원본) 삼각형 수
     var triangleCount = 0
+    /// 이 프레임에 그린 삼각형 수
+    var drawnTriangleCount = 0
+    var lodLevelCount = 1
     var vertexCount = 0
     var materialCount = 0
     var textureCount = 0

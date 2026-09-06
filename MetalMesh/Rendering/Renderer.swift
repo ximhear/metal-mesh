@@ -40,6 +40,9 @@ final class Renderer: NSObject, MTKViewDelegate {
     private let statsBuffers: [MTLBuffer]
     /// 메시렛별 지난 프레임 가시성 (uint). 오클루전 2패스에서 GPU가 읽고 쓴다.
     private let visibilityBuffer: MTLBuffer
+    /// 메시렛별 LOD 정보
+    private let lodBuffer: MTLBuffer
+    private let lodLevelCount: Int
     private var hizTexture: MTLTexture?
     private var hizLevelViews: [MTLTexture] = []
     /// IBL 환경 (없으면 방향광 폴백)
@@ -103,9 +106,22 @@ final class Renderer: NSObject, MTKViewDelegate {
             device.makeBuffer(bytes: raw.baseAddress!, length: raw.count, options: .storageModeShared)!
         }
         visibilityBuffer.label = "visibility"
+        // LOD 정보: 계층이 없으면 전부 레벨 0 (자기 오차 0, 부모 없음)
+        var lods = mesh.lod
+        if lods.count != mesh.meshlets.count {
+            lods = mesh.meshlets.map { m in
+                var l = MeshletLOD(); l.center = m.boundsCenter; l.radius = m.boundsRadius; l.parentError = LOD_ERROR_INFINITE; return l
+            }
+        }
+        lodBuffer = lods.withUnsafeBytes { raw in
+            device.makeBuffer(bytes: raw.baseAddress!, length: raw.count, options: .storageModeShared)!
+        }
+        lodBuffer.label = "meshletLOD"
+        lodLevelCount = mesh.lodLevelCount
 
         stats.meshletCount = gpuMesh.meshletCount
-        stats.triangleCount = gpuMesh.triangleCount
+        stats.triangleCount = mesh.level0TriangleCount
+        stats.lodLevelCount = mesh.lodLevelCount
         stats.vertexCount = gpuMesh.vertexCount
         stats.materialCount = gpuMesh.materialCount
         stats.textureCount = gpuMesh.textureCount
@@ -138,6 +154,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         frameIndex += 1
 
         let depthTexture = passDescriptor.depthAttachment.texture
+        if let h = passDescriptor.colorAttachments[0].texture?.height ?? depthTexture?.height { viewportHeight = Float(h) }
         let canOcclude = settings.occlusionEnabled
             && depthTexture.map { $0.usage.contains(.shaderRead) && $0.storageMode != .memoryless } == true
         if canOcclude, let depthTexture { ensureHiZ(width: depthTexture.width, height: depthTexture.height) }
@@ -174,11 +191,12 @@ final class Renderer: NSObject, MTKViewDelegate {
         commandBuffer.addCompletedHandler { [weak self] buffer in
             let drawn = Int(statsPointer[Int(STAT_DRAWN)])
             let occluded = Int(statsPointer[Int(STAT_OCCLUDED)])
+            let triangles = Int(statsPointer[Int(STAT_TRIANGLES)])
             let gpuTime = buffer.gpuEndTime - buffer.gpuStartTime
             semaphore.signal()
             guard !waitUntilCompleted else { return }
             DispatchQueue.main.async {
-                self?.publishStats(visible: drawn, occluded: occluded, gpuTime: gpuTime)
+                self?.publishStats(visible: drawn, occluded: occluded, triangles: triangles, gpuTime: gpuTime)
             }
         }
         commandBuffer.commit()
@@ -186,7 +204,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         guard waitUntilCompleted else { return nil }
         commandBuffer.waitUntilCompleted()
         let drawn = Int(statsPointer[Int(STAT_DRAWN)])
-        publishStats(visible: drawn, occluded: Int(statsPointer[Int(STAT_OCCLUDED)]),
+        publishStats(visible: drawn, occluded: Int(statsPointer[Int(STAT_OCCLUDED)]), triangles: Int(statsPointer[Int(STAT_TRIANGLES)]),
                      gpuTime: commandBuffer.gpuEndTime - commandBuffer.gpuStartTime, force: true)
         return drawn
     }
@@ -211,6 +229,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         encoder.setObjectBuffer(statsBuffers[slot], offset: 0, index: Int(BUFFER_STATS))
         encoder.setObjectBytes(&pass, length: MemoryLayout<UInt32>.stride, index: Int(BUFFER_CULL_PASS))
         encoder.setObjectBuffer(visibilityBuffer, offset: 0, index: Int(BUFFER_VISIBILITY))
+        encoder.setObjectBuffer(lodBuffer, offset: 0, index: Int(BUFFER_MESHLET_LOD))
         if let hizTexture { encoder.setObjectTexture(hizTexture, index: Int(TEXTURE_HIZ)) }
 
         encoder.setMeshBuffer(uniformBuffers[slot], offset: 0, index: Int(BUFFER_UNIFORMS))
@@ -276,9 +295,10 @@ final class Renderer: NSObject, MTKViewDelegate {
         encoder.endEncoding()
     }
 
-    private func publishStats(visible: Int, occluded: Int, gpuTime: Double, force: Bool = false) {
+    private func publishStats(visible: Int, occluded: Int, triangles: Int, gpuTime: Double, force: Bool = false) {
         stats.visibleMeshletCount = visible
         stats.occludedMeshletCount = occluded
+        stats.drawnTriangleCount = triangles
         stats.gpuTime = gpuTime
         let now = Date()
         if force || now.timeIntervalSince(lastStatsReport) > 0.25 {
@@ -286,6 +306,9 @@ final class Renderer: NSObject, MTKViewDelegate {
             onStats?(stats)
         }
     }
+
+    /// 현재 렌더 타깃 높이(픽셀). LOD 오차 투영에 쓴다. renderFrame이 갱신한다.
+    private var viewportHeight: Float = 1
 
     private func writeUniforms(into buffer: MTLBuffer, occlusion: Bool) {
         let view = camera.viewMatrix
@@ -306,6 +329,9 @@ final class Renderer: NSObject, MTKViewDelegate {
         u.exposure = settings.exposure
         u.iblEnabled = (environment != nil && settings.iblEnabled) ? 1 : 0
         u.envSpecularMipCount = Float(environment?.specularMipCount ?? 1)
+        u.lodEnabled = (settings.lodEnabled && lodLevelCount > 1) ? 1 : 0
+        u.lodThresholdPx = max(settings.lodThresholdPx, 0.05)
+        u.lodScale = viewportHeight / (2 * tan(camera.fovY * 0.5))
         if let hizTexture {
             u.hizSize = SIMD2(UInt32(hizTexture.width), UInt32(hizTexture.height))
             u.hizMipCount = UInt32(hizTexture.mipmapLevelCount)

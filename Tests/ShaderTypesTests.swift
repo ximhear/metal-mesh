@@ -36,6 +36,16 @@ struct ShaderTypesTests {
         #expect(MemoryLayout<Material>.offset(of: \.metallicChannel) == 68)
     }
 
+    @Test func meshletLODLayout() {
+        // simd_float3는 16바이트 정렬이라 C/MSL 모두 80바이트가 된다
+        #expect(MemoryLayout<MeshletLOD>.stride == 80)
+        #expect(MemoryLayout<MeshletLOD>.offset(of: \.radius) == 16)
+        #expect(MemoryLayout<MeshletLOD>.offset(of: \.parentCenter) == 32)
+        #expect(MemoryLayout<MeshletLOD>.offset(of: \.parentRadius) == 48)
+        #expect(MemoryLayout<MeshletLOD>.offset(of: \.error) == 52)
+        #expect(MemoryLayout<MeshletLOD>.offset(of: \.level) == 60)
+    }
+
     @Test func limitsWithinMetalMaximums() {
         #expect(MESHLET_MAX_VERTICES <= 256)
         #expect(MESHLET_MAX_TRIANGLES <= 512)
