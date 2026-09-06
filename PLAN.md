@@ -162,7 +162,9 @@ xcodebuild -project MetalMesh.xcodeproj -scheme MetalMesh -destination 'platform
 - [x] **2패스 Hi-Z 오클루전 컬링**: 가시성 비트 버퍼, 깊이→r32Float 밉 피라미드(컴퓨트 max 축소), 경계 구 AABB 투영 + 3×3 샘플.
   컬링률 dragon 15.4→31.6%, 사자 23.2→43.8% (128px 타깃). 두 패스 결과가 단일 패스와 픽셀 동일함을 테스트로 고정
 - [x] 트랙볼 카메라 (쿼터니언, 짐벌 락 제거)
-- [ ] PBR + IBL (HDRI 환경광, 러프니스·메탈릭·노멀 맵) — Poly Haven 텍스처가 이미 있음
+- [x] **PBR + IBL** (2026-09-06): Vertex에 탄젠트(64B), Material 80B(텍스처 4장 + 계수), 로더 재질 확장(USD semantic + Poly Haven 이웃 파일 규칙, glTF MR/normal),
+  `IBLEnvironment`(HDRI→큐브맵→조도/GGX 프리필터/BRDF LUT 컴퓨트, 디바이스당 1회), Cook-Torrance + split-sum IBL + ACES. 환경광 토글, 방향광 폴백.
+  EXR 노멀 맵은 ImageIO 디코딩 실패 → PNG로 교체. 테스트 59개
 - [ ] 클러스터 LOD (메시렛 그룹 단순화 DAG, 화면 오차 기준 GPU 선택)
 - [ ] MetalFX 업스케일링, MSAA
 - [ ] 그림자(섀도 맵), SSAO

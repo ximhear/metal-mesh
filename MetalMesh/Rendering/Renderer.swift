@@ -42,6 +42,8 @@ final class Renderer: NSObject, MTKViewDelegate {
     private let visibilityBuffer: MTLBuffer
     private var hizTexture: MTLTexture?
     private var hizLevelViews: [MTLTexture] = []
+    /// IBL 환경 (없으면 방향광 폴백)
+    let environment: IBLEnvironment?
     private let inflight = DispatchSemaphore(value: Renderer.maxFramesInFlight)
     private var frameIndex = 0
     private var lastStatsReport = Date.distantPast
@@ -56,6 +58,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         guard let queue = device.makeCommandQueue() else { throw Error.meshShadersUnsupported }
         commandQueue = queue
         gpuMesh = try GPUMesh(device: device, mesh: mesh, materials: materials)
+        environment = IBLEnvironment.default(device: device)
 
         guard let library = device.makeDefaultLibrary() else { throw Error.libraryNotFound }
         func function(_ name: String) throws -> MTLFunction {
@@ -219,6 +222,11 @@ final class Renderer: NSObject, MTKViewDelegate {
         encoder.setFragmentBuffer(uniformBuffers[slot], offset: 0, index: Int(BUFFER_UNIFORMS))
         encoder.setFragmentBuffer(gpuMesh.materials, offset: 0, index: Int(BUFFER_MATERIALS))
         encoder.useResources(gpuMesh.textures, usage: .read, stages: .fragment)
+        if let environment {
+            encoder.setFragmentTexture(environment.irradiance, index: Int(TEXTURE_IBL_IRRADIANCE))
+            encoder.setFragmentTexture(environment.specular, index: Int(TEXTURE_IBL_SPECULAR))
+            encoder.setFragmentTexture(environment.brdfLUT, index: Int(TEXTURE_IBL_BRDF_LUT))
+        }
 
         let objectThreads = Int(OBJECT_THREADS_PER_THREADGROUP)
         let threadgroups = (gpuMesh.meshletCount + objectThreads - 1) / objectThreads
@@ -294,6 +302,10 @@ final class Renderer: NSObject, MTKViewDelegate {
         u.cullingEnabled = settings.cullingEnabled ? 1 : 0
         u.texturesEnabled = settings.texturesEnabled ? 1 : 0
         u.occlusionEnabled = occlusion ? 1 : 0
+        u.viewToWorld = simd_transpose(Math.upperLeft3x3(view))   // 순수 회전 → 역행렬 = 전치
+        u.exposure = settings.exposure
+        u.iblEnabled = (environment != nil && settings.iblEnabled) ? 1 : 0
+        u.envSpecularMipCount = Float(environment?.specularMipCount ?? 1)
         if let hizTexture {
             u.hizSize = SIMD2(UInt32(hizTexture.width), UInt32(hizTexture.height))
             u.hizMipCount = UInt32(hizTexture.mipmapLevelCount)

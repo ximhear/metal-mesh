@@ -76,6 +76,15 @@ struct GLBLoaderTests {
         #expect(meshlets.triangleCount == mesh.triangleCount)
     }
 
+    @Test func avocadoHasMetallicRoughnessAndNormal() async throws {
+        let mesh = try await ModelLoader.load(url: try sampleURL("Avocado/Avocado.glb"))
+        let m = try #require(mesh.materials.first { $0.baseColorImage != nil })
+        #expect(m.roughnessImage != nil && m.roughnessChannel == 1)
+        #expect(m.metallicImage != nil && m.metallicChannel == 2)
+        #expect(m.roughnessImage === m.metallicImage, "glTF는 한 텍스처를 공유")
+        #expect(m.normalImage != nil)
+    }
+
     @Test func loadsPolyPizzaBunny() async throws {
         let mesh = try await ModelLoader.load(url: try sampleURL("polypizza-bunny/polypizza-bunny.glb"))
         #expect(mesh.triangleCount > 100)

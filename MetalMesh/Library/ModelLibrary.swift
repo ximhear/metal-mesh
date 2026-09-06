@@ -30,7 +30,8 @@ final class ModelLibrary {
 
     private var indexURL: URL { rootDirectory.appendingPathComponent("library.json") }
     private var modelsDirectory: URL { rootDirectory.appendingPathComponent("Models", isDirectory: true) }
-    var thumbnailsDirectory: URL { rootDirectory.appendingPathComponent("Thumbnails", isDirectory: true) }
+    /// 렌더링이 바뀌면 버전을 올려 썸네일을 다시 만들게 한다 (v2: PBR + IBL)
+    var thumbnailsDirectory: URL { rootDirectory.appendingPathComponent("Thumbnails-v2", isDirectory: true) }
     private var samplesDirectory: URL? { bundle.url(forResource: "Samples", withExtension: nil) }
 
     /// 파일 임포터에 넘길 타입 목록
@@ -184,6 +185,7 @@ final class ModelLibrary {
             try? fileManager.removeItem(at: url.deletingLastPathComponent())
         }
         try? fileManager.removeItem(at: thumbnailsDirectory.appendingPathComponent("\(entry.id.uuidString).png"))
+        try? fileManager.removeItem(at: rootDirectory.appendingPathComponent("Thumbnails/\(entry.id.uuidString).png"))
         entries.removeAll { $0.id == entry.id }
         save()
     }

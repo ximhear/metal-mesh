@@ -1,0 +1,4 @@
+Studio Small 09 (HDRI, 1k)
+Source: https://polyhaven.com/a/studio_small_09
+License: CC0 1.0 (Poly Haven)
+용도: 이미지 기반 조명(IBL) 환경맵

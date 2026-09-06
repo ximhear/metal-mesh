@@ -90,6 +90,7 @@ struct ModelViewerView: View {
                 Toggle(isOn: $settings.wireframe) { Label("와이어프레임", systemImage: "grid") }
                 Toggle(isOn: $settings.texturesEnabled) { Label("텍스처", systemImage: "photo") }
                     .disabled(stats.textureCount == 0)
+                Toggle(isOn: $settings.iblEnabled) { Label("환경광", systemImage: "sun.max") }
                 infoButton
             }
             #else
@@ -106,6 +107,7 @@ struct ModelViewerView: View {
                     Toggle(isOn: $settings.wireframe) { Label("와이어프레임", systemImage: "grid") }
                     Toggle(isOn: $settings.texturesEnabled) { Label("텍스처", systemImage: "photo") }
                         .disabled(stats.textureCount == 0)
+                    Toggle(isOn: $settings.iblEnabled) { Label("환경광 (IBL)", systemImage: "sun.max") }
                 } label: {
                     Label("표시 옵션", systemImage: "slider.horizontal.3")
                 }

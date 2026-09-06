@@ -125,6 +125,7 @@ struct VertexOut {
     float3 normalView;
     float3 positionView;
     float2 uv;
+    float4 tangentView;   // xyz 뷰 공간 탄젠트, w 손잡이 (0이면 없음)
 };
 
 struct PrimitiveOut {
@@ -156,6 +157,7 @@ void meshMain(MeshletMesh out,
         o.positionView = (u.modelView * p).xyz;
         o.normalView = normalize(u.normalMatrix * v.normal);
         o.uv = v.uv;
+        o.tangentView = float4(u.normalMatrix * v.tangent.xyz, v.tangent.w);
         out.set_vertex(tid, o);
     }
 
@@ -186,38 +188,108 @@ static float3 meshletColor(uint id) {
     return 0.35 + 0.65 * c;
 }
 
-constexpr sampler baseColorSampler(address::repeat, filter::linear, mip_filter::linear);
+constexpr sampler materialSampler(address::repeat, filter::linear, mip_filter::linear);
+constexpr sampler iblSampler(filter::linear, mip_filter::linear, address::clamp_to_edge);
+
+static float3 fresnelSchlickRoughness(float cosTheta, float3 f0, float roughness) {
+    return f0 + (max(float3(1.0 - roughness), f0) - f0) * pow(1.0 - cosTheta, 5.0);
+}
+
+static float distributionGGX(float nDotH, float roughness) {
+    float a = roughness * roughness;
+    float a2 = a * a;
+    float d = nDotH * nDotH * (a2 - 1.0) + 1.0;
+    return a2 / (3.14159265 * d * d + 1e-6);
+}
+
+static float geometrySmith(float nDotV, float nDotL, float roughness) {
+    float r = roughness + 1.0;
+    float k = (r * r) / 8.0;
+    float gv = nDotV / (nDotV * (1.0 - k) + k);
+    float gl = nDotL / (nDotL * (1.0 - k) + k);
+    return gv * gl;
+}
+
+static float3 acesToneMap(float3 x) {
+    const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
 
 fragment float4 fragmentMain(FragmentIn in [[stage_in]],
                              constant Uniforms& u                  [[buffer(BUFFER_UNIFORMS)]],
-                             const device Material* materials      [[buffer(BUFFER_MATERIALS)]])
+                             const device Material* materials      [[buffer(BUFFER_MATERIALS)]],
+                             texturecube<float> irradianceMap      [[texture(TEXTURE_IBL_IRRADIANCE)]],
+                             texturecube<float> specularMap        [[texture(TEXTURE_IBL_SPECULAR)]],
+                             texture2d<float> brdfLUT              [[texture(TEXTURE_IBL_BRDF_LUT)]])
 {
     float3 n = normalize(in.v.normalView);
     float3 viewDir = normalize(-in.v.positionView);
     // 뒷면(또는 뒤집힌 와인딩)도 조명이 맞도록 카메라 쪽으로 노멀을 뒤집는다
     if (dot(n, viewDir) < 0.0) n = -n;
 
-    float3 base;
-    switch (u.debugMode) {
-        case 1:  base = meshletColor(in.p.meshletID); break;
-        case 2:  base = n * 0.5 + 0.5; break;
-        default: {
-            const device Material& m = materials[in.p.materialIndex];
-            base = m.baseColorFactor.rgb;
-            if (u.texturesEnabled && m.hasTexture) {
-                // Model I/O UV는 좌하단 원점, Metal 텍스처는 좌상단 원점 → v 뒤집기
-                float2 uv = float2(in.v.uv.x, 1.0 - in.v.uv.y);
-                base *= m.baseColorTexture.sample(baseColorSampler, uv).rgb;
-            }
-            break;
-        }
+    if (u.debugMode == 1) {
+        float3 base = meshletColor(in.p.meshletID);
+        float diffuse = 0.35 + 0.65 * max(dot(n, normalize(float3(0.35, 0.6, 1.0))), 0.0);
+        return float4(base * diffuse, 1.0);
     }
 
-    float3 keyLight = normalize(float3(0.35, 0.6, 1.0));   // 뷰 공간, 카메라 위쪽에서
-    float3 fillLight = normalize(float3(-0.6, -0.2, 0.5));
-    float diffuse = max(dot(n, keyLight), 0.0) + 0.35 * max(dot(n, fillLight), 0.0);
-    float3 h = normalize(keyLight + viewDir);
-    float spec = pow(max(dot(n, h), 0.0), 48.0) * 0.2;
-    float3 color = base * (0.18 + 0.82 * diffuse) + spec;
+    const device Material& m = materials[in.p.materialIndex];
+    // Model I/O UV는 좌하단 원점, Metal 텍스처는 좌상단 원점 → v 뒤집기
+    float2 uv = float2(in.v.uv.x, 1.0 - in.v.uv.y);
+    bool useTextures = u.texturesEnabled != 0u;
+
+    // 노멀 맵 (탄젠트가 있을 때만)
+    if (useTextures && (m.flags & MATERIAL_HAS_NORMAL) && in.v.tangentView.w != 0.0) {
+        float3 t = normalize(in.v.tangentView.xyz - n * dot(n, in.v.tangentView.xyz));
+        float3 b = cross(n, t) * in.v.tangentView.w;
+        float3 nm = m.normalTexture.sample(materialSampler, uv).xyz * 2.0 - 1.0;
+        nm.xy *= m.normalScale;
+        n = normalize(t * nm.x + b * nm.y + n * max(nm.z, 1e-3));
+    }
+    if (u.debugMode == 2) return float4(n * 0.5 + 0.5, 1.0);
+
+    float3 albedo = m.baseColorFactor.rgb;
+    if (useTextures && (m.flags & MATERIAL_HAS_BASE_COLOR)) albedo *= m.baseColorTexture.sample(materialSampler, uv).rgb;
+    float roughness = m.roughnessFactor;
+    if (useTextures && (m.flags & MATERIAL_HAS_ROUGHNESS)) roughness *= m.roughnessTexture.sample(materialSampler, uv)[m.roughnessChannel];
+    float metallic = m.metallicFactor;
+    if (useTextures && (m.flags & MATERIAL_HAS_METALLIC)) metallic *= m.metallicTexture.sample(materialSampler, uv)[m.metallicChannel];
+    roughness = clamp(roughness, 0.04, 1.0);
+    metallic = clamp(metallic, 0.0, 1.0);
+
+    float nDotV = max(dot(n, viewDir), 1e-4);
+    float3 f0 = mix(float3(0.04), albedo, metallic);
+    float3 color = 0.0;
+
+    if (u.iblEnabled != 0u) {
+        float3 nWorld = normalize(u.viewToWorld * n);
+        float3 rWorld = normalize(u.viewToWorld * reflect(-viewDir, n));
+        float3 kS = fresnelSchlickRoughness(nDotV, f0, roughness);
+        float3 kD = (1.0 - kS) * (1.0 - metallic);
+        float3 irradiance = irradianceMap.sample(iblSampler, nWorld).rgb;
+        float3 diffuse = irradiance * albedo;
+        float3 prefiltered = specularMap.sample(iblSampler, rWorld, level(roughness * (u.envSpecularMipCount - 1.0))).rgb;
+        float2 brdf = brdfLUT.sample(iblSampler, float2(nDotV, roughness)).rg;
+        float3 specular = prefiltered * (kS * brdf.x + brdf.y);
+        color = kD * diffuse + specular;
+    } else {
+        // 환경맵이 없을 때: 방향광 2개 + 앰비언트 (Cook-Torrance 직접광)
+        float3 lights[2] = { normalize(float3(0.35, 0.6, 1.0)), normalize(float3(-0.6, -0.2, 0.5)) };
+        float intensities[2] = { 2.2, 0.7 };
+        color = albedo * (1.0 - metallic) * 0.15;
+        for (int i = 0; i < 2; ++i) {
+            float3 l = lights[i];
+            float3 h = normalize(l + viewDir);
+            float nDotL = max(dot(n, l), 0.0);
+            float nDotH = max(dot(n, h), 0.0);
+            float3 F = f0 + (1.0 - f0) * pow(1.0 - max(dot(h, viewDir), 0.0), 5.0);
+            float D = distributionGGX(nDotH, roughness);
+            float G = geometrySmith(nDotV, nDotL, roughness);
+            float3 spec = (D * G * F) / (4.0 * nDotV * nDotL + 1e-4);
+            float3 kD = (1.0 - F) * (1.0 - metallic);
+            color += (kD * albedo / 3.14159265 + spec) * nDotL * intensities[i];
+        }
+    }
+    color = acesToneMap(color * u.exposure);
     return float4(color, 1.0);
 }

@@ -59,6 +59,7 @@ public enum GLBLoader {
         guard !merged.indices.isEmpty else { throw GLBLoaderError.missing("삼각형 메시") }
         merged.materials = context.materials
         if merged.triangleMaterials.allSatisfy({ $0 == 0 }) { merged.triangleMaterials = [] }
+        MeshPostProcess.computeTangents(&merged)
         return merged
     }
 
@@ -231,21 +232,26 @@ public enum GLBLoader {
         if let cached = context.materialIndexMap[gltfIndex] { return cached }
         let material = materials[gltfIndex]
         var data = MaterialData(name: material.name ?? "material\(gltfIndex)")
-        if let f = material.pbrMetallicRoughness?.baseColorFactor, f.count == 4 {
-            data.baseColorFactor = SIMD4(f[0], f[1], f[2], f[3])
+        let pbr = material.pbrMetallicRoughness
+        if let f = pbr?.baseColorFactor, f.count == 4 { data.baseColorFactor = SIMD4(f[0], f[1], f[2], f[3]) }
+        data.metallicFactor = pbr?.metallicFactor ?? 1
+        data.roughnessFactor = pbr?.roughnessFactor ?? 1
+        func textureImage(_ info: GLTF.TextureInfo?) throws -> CGImage? {
+            guard let info, (info.texCoord ?? 0) == 0, let textures = context.gltf.textures,
+                  info.index < textures.count, let source = textures[info.index].source else { return nil }
+            return try image(index: source, context: &context)
         }
-        if let texInfo = material.pbrMetallicRoughness?.baseColorTexture, (texInfo.texCoord ?? 0) == 0,
-           let textures = context.gltf.textures, texInfo.index < textures.count,
-           let source = textures[texInfo.index].source {
-            data.baseColorImage = try image(index: source, context: &context)
+        data.baseColorImage = try textureImage(pbr?.baseColorTexture)
+        if let mr = try textureImage(pbr?.metallicRoughnessTexture) {
+            data.roughnessImage = mr; data.roughnessChannel = 1   // G
+            data.metallicImage = mr;  data.metallicChannel = 2    // B
         }
-        let index: UInt32
-        if data.baseColorImage == nil && data.baseColorFactor == [1, 1, 1, 1] {
-            index = 0
-        } else {
-            index = UInt32(context.materials.count)
-            context.materials.append(data)
+        if let normal = try textureImage(material.normalTexture) {
+            data.normalImage = normal
+            data.normalScale = material.normalTexture?.scale ?? 1
         }
+        let index = UInt32(context.materials.count)
+        context.materials.append(data)
         context.materialIndexMap[gltfIndex] = index
         return index
     }
@@ -414,9 +420,12 @@ public enum GLBLoader {
         }
         struct BufferView: Decodable { var buffer: Int; var byteOffset: Int?; var byteLength: Int; var byteStride: Int? }
         struct Buffer: Decodable { var byteLength: Int; var uri: String? }
-        struct TextureInfo: Decodable { var index: Int; var texCoord: Int? }
-        struct PBR: Decodable { var baseColorFactor: [Float]?; var baseColorTexture: TextureInfo? }
-        struct Material: Decodable { var name: String?; var pbrMetallicRoughness: PBR? }
+        struct TextureInfo: Decodable { var index: Int; var texCoord: Int?; var scale: Float? }
+        struct PBR: Decodable {
+            var baseColorFactor: [Float]?; var baseColorTexture: TextureInfo?
+            var metallicFactor: Float?; var roughnessFactor: Float?; var metallicRoughnessTexture: TextureInfo?
+        }
+        struct Material: Decodable { var name: String?; var pbrMetallicRoughness: PBR?; var normalTexture: TextureInfo? }
         struct Texture: Decodable { var source: Int? }
         struct Image: Decodable { var uri: String?; var bufferView: Int?; var mimeType: String? }
 

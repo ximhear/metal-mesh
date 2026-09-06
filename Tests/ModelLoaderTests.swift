@@ -47,6 +47,19 @@ struct ModelLoaderTests {
         #expect(mesh.triangleMaterials.allSatisfy { $0 == 1 })
     }
 
+    @Test func extractsPBRMapsFromUSDC() async throws {
+        let mesh = try await ModelLoader.load(url: try sampleURL("food_apple_01/food_apple_01_1k.usdc"))
+        let apple = try #require(mesh.materials.last)
+        #expect(apple.roughnessImage != nil, "Poly Haven rough 맵")
+        #expect(apple.normalImage != nil, "Poly Haven nor_gl(EXR) 맵")
+        // 탄젠트가 계산되어 있어야 한다
+        let withTangent = mesh.vertices.filter { $0.tangent.w != 0 }.count
+        #expect(withTangent > mesh.vertices.count / 2)
+        let t = mesh.vertices.first { $0.tangent.w != 0 }!
+        #expect(abs(simd_length(SIMD3(t.tangent.x, t.tangent.y, t.tangent.z)) - 1) < 1e-3)
+        #expect(abs(simd_dot(SIMD3(t.tangent.x, t.tangent.y, t.tangent.z), t.normal)) < 1e-3, "탄젠트 ⟂ 노멀")
+    }
+
     @Test func extractsEmbeddedTexturesFromUSDZ() async throws {
         let mesh = try await ModelLoader.load(url: try sampleURL("egyptian-cat/egyptian-cat.usdz"))
         let textured = mesh.materials.filter { $0.baseColorImage != nil }

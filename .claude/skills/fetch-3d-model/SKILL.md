@@ -50,6 +50,9 @@ for rel,f in u["include"].items():
 EOF
 ```
 
+- **노멀 맵은 PNG로**: `usd` include 목록의 `nor_gl` EXR은 ImageIO가 디코딩하지 못한다(압축 방식 미지원). `files` 응답의
+  `nor_gl.1k.png.url`(다중 재질이면 `nor_gl.<재질>.1k.png.url`)을 `textures/`에 받고 EXR은 지운다.
+  앱 로더는 `_diff_` 파일명 규칙으로 `_rough_`, `_metal_`, `_nor_gl_` 이웃 파일을 찾는다(Model I/O가 usdc의 roughness 연결을 놓침).
 - 라이선스는 항상 CC0 → `LICENSE.txt`에 "CC0 1.0 — https://polyhaven.com/a/<asset_id>" 기록.
 - `usd` 키가 없는 에셋이면 `gltf`로 받은 뒤 5절 변환. 변환 수단이 없으면 사용자에게 알리고 다른 모델 제안.
 

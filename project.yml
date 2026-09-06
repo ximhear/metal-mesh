@@ -48,11 +48,15 @@ targets:
     sources:
       - path: MetalMesh
         excludes:
-          - "Resources/Samples/**"   # 아래 폴더 참조로만 포함
+          - "Resources/Samples/**"       # 아래 폴더 참조로만 포함
+          - "Resources/Environment/**"
       - path: MetalMesh/Resources/Samples
         type: folder
         buildPhase: resources
         optional: true
+      - path: MetalMesh/Resources/Environment
+        type: folder
+        buildPhase: resources
     dependencies:
       - target: MeshCore
         embed: true

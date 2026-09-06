@@ -51,29 +51,46 @@ struct GPUMesh {
         vertexCount = mesh.vertices.count
         triangleCount = mesh.triangleCount
 
-        // 재질 → 텍스처 업로드(sRGB, 밉맵) + 인자 버퍼
+        // 재질 → 텍스처 업로드 + 인자 버퍼. 같은 CGImage는 한 번만 올린다(glTF의 metallicRoughness 공유 등).
         let loader = MTKTextureLoader(device: device)
         let placeholder = try Self.makePlaceholderTexture(device: device)
         var textures: [MTLTexture] = [placeholder]
+        var cache: [ObjectIdentifier: MTLTexture] = [:]
+        func upload(_ image: CGImage?, srgb: Bool, label: String) -> MTLTexture? {
+            guard let image else { return nil }
+            if let cached = cache[ObjectIdentifier(image)] { return cached }
+            guard let loaded = try? loader.newTexture(cgImage: Self.normalizedRGBA(image), options: [
+                .SRGB: srgb,
+                .generateMipmaps: true,
+                .textureUsage: MTLTextureUsage.shaderRead.rawValue,
+                .textureStorageMode: MTLStorageMode.private.rawValue,
+            ]) else { return nil }
+            loaded.label = label
+            cache[ObjectIdentifier(image)] = loaded
+            textures.append(loaded)
+            return loaded
+        }
         var gpuMaterials: [Material] = []
         let sourceMaterials = materialData.isEmpty ? [MaterialData.default] : materialData
         for material in sourceMaterials {
             var m = Material()
             m.baseColorFactor = material.baseColorFactor
-            var texture = placeholder
-            if let image = material.baseColorImage.map(Self.normalizedRGBA),
-               let loaded = try? loader.newTexture(cgImage: image, options: [
-                   .SRGB: true,
-                   .generateMipmaps: true,
-                   .textureUsage: MTLTextureUsage.shaderRead.rawValue,
-                   .textureStorageMode: MTLStorageMode.private.rawValue,
-               ]) {
-                loaded.label = material.name
-                textures.append(loaded)
-                texture = loaded
-                m.hasTexture = 1
-            }
-            m.baseColorTexture._impl = texture.gpuResourceID._impl
+            m.metallicFactor = material.metallicFactor
+            m.roughnessFactor = material.roughnessFactor
+            m.normalScale = material.normalScale
+            m.roughnessChannel = UInt32(material.roughnessChannel)
+            m.metallicChannel = UInt32(material.metallicChannel)
+            var flags: UInt32 = 0
+            var base = placeholder, normal = placeholder, rough = placeholder, metal = placeholder
+            if let t = upload(material.baseColorImage, srgb: true, label: material.name + ".baseColor") { base = t; flags |= MATERIAL_HAS_BASE_COLOR }
+            if let t = upload(material.normalImage, srgb: false, label: material.name + ".normal") { normal = t; flags |= MATERIAL_HAS_NORMAL }
+            if let t = upload(material.roughnessImage, srgb: false, label: material.name + ".roughness") { rough = t; flags |= MATERIAL_HAS_ROUGHNESS }
+            if let t = upload(material.metallicImage, srgb: false, label: material.name + ".metallic") { metal = t; flags |= MATERIAL_HAS_METALLIC }
+            m.flags = flags
+            m.baseColorTexture._impl = base.gpuResourceID._impl
+            m.normalTexture._impl = normal.gpuResourceID._impl
+            m.roughnessTexture._impl = rough.gpuResourceID._impl
+            m.metallicTexture._impl = metal.gpuResourceID._impl
             gpuMaterials.append(m)
         }
         materials = try make(gpuMaterials, "materials")

@@ -141,7 +141,7 @@ struct RendererTests {
         let samples = try #require(Bundle.main.url(forResource: "Samples", withExtension: nil))
         let mesh = try await ModelLoader.load(url: samples.appendingPathComponent("food_apple_01/food_apple_01_1k.usdc"))
         let renderer = try Renderer(device: device, mesh: MeshletBuilder.build(mesh), materials: mesh.materials)
-        #expect(renderer.stats.textureCount == 1)
+        #expect(renderer.stats.textureCount >= 1)
         renderer.camera.frame(center: mesh.boundsCenter, radius: mesh.boundsRadius)
         let target = try makeTarget(device: device)
 
@@ -180,7 +180,7 @@ struct RendererTests {
         let normalized = GPUMesh.normalizedRGBA(image)
         #expect(normalized.bitsPerPixel == 32 && normalized.width == image.width)
         let renderer = try Renderer(device: device, mesh: MeshletBuilder.build(mesh), materials: mesh.materials)
-        #expect(renderer.stats.textureCount == 1)
+        #expect(renderer.stats.textureCount >= 1)
     }
 
     @Test func meshletStrategyComparisonOnRealModels() async throws {

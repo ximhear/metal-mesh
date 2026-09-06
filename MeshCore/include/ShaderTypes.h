@@ -15,11 +15,12 @@
 // mesh 스테이지: 스레드그룹 1개 = 메시렛 1개
 #define MESH_THREADS_PER_THREADGROUP   128
 
-/// 정점. stride 48 (float3는 16바이트 정렬).
+/// 정점. stride 64 (float3는 16바이트 정렬).
 typedef struct {
     simd_float3 position;   // offset 0
     simd_float3 normal;     // offset 16
     simd_float2 uv;         // offset 32
+    simd_float4 tangent;    // offset 48  xyz 탄젠트, w 손잡이(±1). 0이면 노멀 맵 미적용
 } Vertex;
 
 /// 메시렛 서술자. 64바이트.
@@ -49,6 +50,11 @@ typedef struct {
     simd_uint2    hizSize;             // Hi-Z 밉 0 크기 (픽셀)
     unsigned int  hizMipCount;
     unsigned int  occlusionEnabled;
+    simd_float3x3 viewToWorld;         // 뷰 공간 방향 → 월드(=모델) 공간. IBL 큐브맵 조회용
+    float         exposure;
+    float         envSpecularMipCount; // 프리필터 스펙큘러 큐브맵 밉 수
+    unsigned int  iblEnabled;
+    unsigned int  padding2;
 } Uniforms;
 
 /// 컬링 패스 종류 (object 스테이지 setObjectBytes로 전달)
@@ -61,19 +67,33 @@ typedef struct {
 #define STAT_OCCLUDED 1      // Hi-Z 테스트로 제거된 메시렛 수
 #define STAT_COUNT    2
 
-/// 재질. Metal 3 인자 버퍼(tier 2)에 그대로 놓인다. 48바이트.
+/// 재질(metallic-roughness PBR). Metal 3 인자 버퍼(tier 2)에 그대로 놓인다. 80바이트.
 /// MSL에서는 texture2d가 8바이트 리소스 ID로 저장되므로 C 쪽은 MTLResourceID와 같은 8바이트로 맞춘다.
 #ifdef __METAL_VERSION__
-typedef metal::texture2d<float> BaseColorTexture;
+typedef metal::texture2d<float> GPUTexture2D;
 #else
-typedef struct { unsigned long long _impl; } BaseColorTexture;   // == MTLResourceID
+typedef struct { unsigned long long _impl; } GPUTexture2D;   // == MTLResourceID
 #endif
+typedef GPUTexture2D BaseColorTexture;   // 호환용 별칭
+
+#define MATERIAL_HAS_BASE_COLOR  1u
+#define MATERIAL_HAS_NORMAL      2u
+#define MATERIAL_HAS_ROUGHNESS   4u
+#define MATERIAL_HAS_METALLIC    8u
 
 typedef struct {
-    BaseColorTexture baseColorTexture;  // 0  (8B, 텍스처 없으면 1x1 흰색 플레이스홀더)
-    simd_float4      baseColorFactor;   // 16
-    unsigned int     hasTexture;        // 32
-    unsigned int     padding[3];
+    GPUTexture2D baseColorTexture;   // 0   sRGB
+    GPUTexture2D normalTexture;      // 8   탄젠트 공간, OpenGL 규약(+Y 위)
+    GPUTexture2D roughnessTexture;   // 16  roughnessChannel 성분
+    GPUTexture2D metallicTexture;    // 24  metallicChannel 성분 (glTF는 roughness와 같은 텍스처)
+    simd_float4  baseColorFactor;    // 32
+    float        metallicFactor;     // 48
+    float        roughnessFactor;    // 52
+    float        normalScale;        // 56
+    unsigned int flags;              // 60  MATERIAL_HAS_*
+    unsigned int roughnessChannel;   // 64
+    unsigned int metallicChannel;    // 68
+    unsigned int padding[2];         // 72
 } Material;
 
 /// object → mesh 페이로드: 컬링을 통과한 메시렛 인덱스
@@ -85,6 +105,9 @@ typedef struct {
 #define BUFFER_UNIFORMS          0
 #define BUFFER_MESHLETS          1
 #define BUFFER_MATERIALS         1   // fragment 전용: Material 배열 (인자 버퍼)
+#define TEXTURE_IBL_IRRADIANCE   0   // fragment: 조도 큐브맵
+#define TEXTURE_IBL_SPECULAR     1   // fragment: 프리필터 스펙큘러 큐브맵 (밉 = 러프니스)
+#define TEXTURE_IBL_BRDF_LUT     2   // fragment: split-sum BRDF LUT (x: nDotV, y: roughness)
 #define BUFFER_STATS             2   // object 전용: atomic uint[STAT_COUNT]
 #define BUFFER_CULL_PASS         3   // object 전용: uint (CULL_PASS_*)
 #define BUFFER_VISIBILITY        4   // object 전용: uint[meshletCount], 지난 프레임 가시성

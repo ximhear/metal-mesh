@@ -22,6 +22,9 @@ struct RenderSettings: Equatable {
     var texturesEnabled = true
     /// 2패스 Hi-Z 오클루전 컬링
     var occlusionEnabled = true
+    /// 이미지 기반 조명 (환경맵). 끄면 방향광 2개로 셰이딩
+    var iblEnabled = true
+    var exposure: Float = 1.0
 }
 
 /// 렌더러가 프레임마다 채우는 통계. 메인 스레드에서 갱신된다.

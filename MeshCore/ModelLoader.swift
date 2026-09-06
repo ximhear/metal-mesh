@@ -10,15 +10,37 @@ public struct MaterialData: @unchecked Sendable, Equatable {
     public var baseColorFactor: SIMD4<Float> = [1, 1, 1, 1]
     /// sRGB baseColor 이미지. nil이면 색 계수만 쓴다.
     public var baseColorImage: CGImage?
+    /// 탄젠트 공간 노멀 맵 (OpenGL 규약, +Y 위). 선형.
+    public var normalImage: CGImage?
+    public var normalScale: Float = 1
+    /// 러프니스 텍스처와 읽을 채널 (0=R,1=G,2=B). glTF는 metallicRoughness 텍스처의 G.
+    public var roughnessImage: CGImage?
+    public var roughnessChannel: Int = 0
+    public var roughnessFactor: Float = 1
+    /// 메탈릭 텍스처와 채널. glTF는 metallicRoughness 텍스처의 B.
+    public var metallicImage: CGImage?
+    public var metallicChannel: Int = 0
+    public var metallicFactor: Float = 0
 
     public init(name: String, baseColorFactor: SIMD4<Float> = [1, 1, 1, 1], baseColorImage: CGImage? = nil) {
         self.name = name; self.baseColorFactor = baseColorFactor; self.baseColorImage = baseColorImage
     }
 
-    public static let `default` = MaterialData(name: "default")
+    /// 텍스처 없는 회색·비금속 기본 재질 (러프니스 0.6)
+    public static let `default`: MaterialData = {
+        var m = MaterialData(name: "default")
+        m.roughnessFactor = 0.6
+        return m
+    }()
+
+    public var hasAnyTexture: Bool {
+        baseColorImage != nil || normalImage != nil || roughnessImage != nil || metallicImage != nil
+    }
 
     public static func == (a: MaterialData, b: MaterialData) -> Bool {
         a.name == b.name && a.baseColorFactor == b.baseColorFactor && a.baseColorImage === b.baseColorImage
+            && a.normalImage === b.normalImage && a.roughnessImage === b.roughnessImage && a.metallicImage === b.metallicImage
+            && a.roughnessFactor == b.roughnessFactor && a.metallicFactor == b.metallicFactor
     }
 }
 
@@ -113,6 +135,7 @@ public enum ModelLoader {
         // Model I/O는 서브메시/면 단위로 정점을 복제하는 일이 많다. 같은 정점을 합쳐 메시렛 정점 재사용률을 높인다.
         MeshPostProcess.weld(&merged, includeNormals: !needsNormals)
         if needsNormals { MeshPostProcess.computeSmoothNormals(&merged) }
+        MeshPostProcess.computeTangents(&merged)
         return merged
     }
 
@@ -128,30 +151,54 @@ public enum ModelLoader {
 
         mutating func index(for mdlMaterial: MDLMaterial?) -> UInt32 {
             guard let mdlMaterial else { return 0 }
-            // baseColor 의미의 속성이 여러 개일 수 있다(예: USD의 상수 baseColor + 텍스처 diffuseColor).
-            // 텍스처가 있는 속성을 우선하고, 없으면 상수 색을 쓴다.
-            let candidates = (0..<mdlMaterial.count).compactMap { mdlMaterial[$0] }.filter { $0.semantic == .baseColor }
-            guard !candidates.isEmpty else { return 0 }
-
+            let all = (0..<mdlMaterial.count).compactMap { mdlMaterial[$0] }
             var data = MaterialData(name: mdlMaterial.name)
+            data.roughnessFactor = 0.6
             var key = ""
-            for property in candidates {
+
+            // baseColor: 의미가 같은 속성이 여러 개일 수 있다(예: USD의 상수 baseColor + 텍스처 diffuseColor). 텍스처 우선.
+            let baseCandidates = all.filter { $0.semantic == .baseColor }
+            var baseColorURL: URL?
+            for property in baseCandidates {
                 if let (image, imageKey) = image(from: property) {
-                    data.baseColorImage = image
-                    key = imageKey
+                    data.baseColorImage = image; key += imageKey
+                    baseColorURL = fileURL(of: property)
                     break
                 }
             }
             if data.baseColorImage == nil {
-                for property in candidates {
-                    if let color = constantColor(from: property) {
-                        data.baseColorFactor = color
-                        key = "color:\(color)"
-                        break
-                    }
+                for property in baseCandidates {
+                    if let color = constantColor(from: property) { data.baseColorFactor = color; key += "color:\(color)"; break }
                 }
             }
-            if data.baseColorImage == nil && data.baseColorFactor == [1, 1, 1, 1] { return 0 }
+            // 러프니스 / 메탈릭: 텍스처면 R 채널, 아니면 스칼라
+            if let p = all.first(where: { $0.semantic == .roughness }) {
+                if let (image, k) = image(from: p) { data.roughnessImage = image; data.roughnessChannel = 0; data.roughnessFactor = 1; key += "|r:" + k }
+                else if p.type == .float { data.roughnessFactor = p.floatValue; key += "|r:\(p.floatValue)" }
+            }
+            if let p = all.first(where: { $0.semantic == .metallic }) {
+                if let (image, k) = image(from: p) { data.metallicImage = image; data.metallicChannel = 0; data.metallicFactor = 1; key += "|m:" + k }
+                else if p.type == .float { data.metallicFactor = p.floatValue; key += "|m:\(p.floatValue)" }
+            }
+            if let p = all.first(where: { $0.semantic == .tangentSpaceNormal }), let (image, k) = image(from: p) {
+                data.normalImage = image; key += "|n:" + k
+            }
+            // Model I/O가 USD의 roughness/metallic 텍스처 연결을 놓치는 경우(Poly Haven usdc: 빈 문자열)
+            // baseColor 파일명 규칙(_diff_ → _rough_ / _metal_ / _nor_gl_)으로 이웃 파일을 찾는다.
+            if let baseURL = baseColorURL {
+                if data.roughnessImage == nil, let (image, url) = sibling(of: baseURL, replacing: "diff", withAny: ["rough", "roughness"]) {
+                    data.roughnessImage = image; data.roughnessChannel = 0; data.roughnessFactor = 1; key += "|r:" + url
+                }
+                if data.metallicImage == nil, let (image, url) = sibling(of: baseURL, replacing: "diff", withAny: ["metal", "metallic"]) {
+                    data.metallicImage = image; data.metallicChannel = 0; data.metallicFactor = 1; key += "|m:" + url
+                }
+                if data.normalImage == nil, let (image, url) = sibling(of: baseURL, replacing: "diff", withAny: ["nor_gl", "normal"]) {
+                    data.normalImage = image; key += "|n:" + url
+                }
+            }
+
+            // 텍스처도 색도 금속성도 없는 재질은 기본 재질로 합친다 (Model I/O가 OBJ에도 스칼라 러프니스를 붙이므로 러프니스는 무시)
+            if !data.hasAnyTexture && data.baseColorFactor == [1, 1, 1, 1] && data.metallicFactor == 0 { return 0 }
             if let existing = indexByKey[key] { return existing }
             let index = UInt32(materials.count)
             materials.append(data)
@@ -190,6 +237,30 @@ public enum ModelLoader {
                 return [Float(c[0]), Float(c[1]), Float(c[2]), c.count > 3 ? Float(c[3]) : 1]
             default: return nil
             }
+        }
+
+        /// 텍스처 속성이 가리키는 파일 URL (있으면)
+        private func fileURL(of property: MDLMaterialProperty) -> URL? {
+            if let url = property.urlValue, url.isFileURL { return url }
+            if let path = property.stringValue, !path.isEmpty { return URL(fileURLWithPath: path, relativeTo: assetDirectory) }
+            return nil
+        }
+
+        /// 같은 폴더에서 파일명의 `token`을 `replacement`로 바꾼 이웃 텍스처 (확장자는 jpg/png/exr 순으로 시도)
+        private func sibling(of url: URL, replacing token: String, withAny replacements: [String]) -> (CGImage, String)? {
+            let name = url.deletingPathExtension().lastPathComponent
+            guard name.contains("_\(token)_") else { return nil }
+            let dir = url.deletingLastPathComponent()
+            for replacement in replacements {
+                let stem = name.replacingOccurrences(of: "_\(token)_", with: "_\(replacement)_")
+                for ext in [url.pathExtension, "jpg", "png"] where !ext.isEmpty {
+                    let candidate = dir.appendingPathComponent(stem).appendingPathExtension(ext)
+                    if FileManager.default.fileExists(atPath: candidate.path), let image = loadImage(at: candidate) {
+                        return (image, candidate.absoluteString)
+                    }
+                }
+            }
+            return nil
         }
 
         private func loadImage(at url: URL) -> CGImage? {
@@ -241,6 +312,7 @@ public enum ModelLoader {
         let raw = map.bytes.bindMemory(to: Vertex.self, capacity: vertexCount)
         for i in 0..<vertexCount {
             var v = raw[i]
+            v.tangent = .zero   // 버퍼에는 탄젠트 영역이 없다(후처리에서 계산)
             let p = transform * SIMD4(v.position, 1)
             v.position = SIMD3(p.x, p.y, p.z) / (p.w == 0 ? 1 : p.w)
             let n = normalMatrix * v.normal
