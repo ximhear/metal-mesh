@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import Metal
+import CoreGraphics
 import simd
 @testable import MetalMesh
 @testable import MeshCore
@@ -436,6 +437,23 @@ struct RendererTests {
         renderer.settings.groundEnabled = false
         renderer.renderFrame(passDescriptor: target.pass, drawable: nil, waitUntilCompleted: true)
         #expect(coverage(of: target) > 0.05)
+    }
+
+    @Test func onePixelTextureDoesNotRequestMipmaps() throws {
+        // iPhone 실기기 크래시 회귀: 1×1 텍스처 + generateMipmaps → "[tex mipmapLevelCount](1) must be > 1"
+        let device = try #require(self.device)
+        let cs = CGColorSpace(name: CGColorSpace.sRGB)!
+        let ctx = try #require(CGContext(data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4, space: cs,
+                                         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        ctx.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
+        let image = try #require(ctx.makeImage())
+        var material = MaterialData(name: "tiny")
+        material.baseColorImage = image
+        material.normalImage = image
+        let mesh = MeshletBuilder.build(makeGridMesh(2))
+        let gpu = try GPUMesh(device: device, mesh: mesh, materials: [material])
+        #expect(gpu.textureCount == 1, "같은 CGImage는 한 번만 올린다")
+        #expect(gpu.textures.allSatisfy { $0.mipmapLevelCount == 1 })
     }
 
     @Test func frustumPlanesContainCameraTarget() {

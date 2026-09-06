@@ -59,9 +59,12 @@ struct GPUMesh {
         func upload(_ image: CGImage?, srgb: Bool, label: String) -> MTLTexture? {
             guard let image else { return nil }
             if let cached = cache[ObjectIdentifier(image)] { return cached }
+            // 1×1 텍스처(usdz의 상수 색 플레이스홀더)에 밉맵을 만들면 Metal 검증이 abort한다:
+            // "[tex mipmapLevelCount](1) must be > 1"
+            let wantsMipmaps = image.width > 1 && image.height > 1
             guard let loaded = try? loader.newTexture(cgImage: Self.normalizedRGBA(image), options: [
                 .SRGB: srgb,
-                .generateMipmaps: true,
+                .generateMipmaps: wantsMipmaps,
                 .textureUsage: MTLTextureUsage.shaderRead.rawValue,
                 .textureStorageMode: MTLStorageMode.private.rawValue,
             ]) else { return nil }
