@@ -37,7 +37,7 @@ final class ThumbnailStore {
     }
 
     func url(for entry: ModelEntry) -> URL {
-        directory.appendingPathComponent("\(entry.id.uuidString).png")
+        directory.appendingPathComponent("\(entry.id.uuidString)-y-up-v1.png")
     }
 
     /// 캐시된 이미지. 없으면 디스크에서 읽고, 그것도 없으면 생성 큐에 넣는다.

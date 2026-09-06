@@ -10,10 +10,9 @@ struct GroundOut {
 };
 
 vertex GroundOut groundVertex(uint vid [[vertex_id]], constant Uniforms& u [[buffer(BUFFER_UNIFORMS)]]) {
-    // 삼각형 2개 = 사각형, 중심은 (0, groundY, 0)이 아니라 카메라 타깃을 따르도록 반지름 큰 사각형
     float2 corners[6] = { float2(-1, -1), float2(1, -1), float2(1, 1), float2(-1, -1), float2(1, 1), float2(-1, 1) };
     float2 c = corners[vid] * u.groundRadius;
-    float3 p = float3(c.x, u.groundY, c.y) + float3(u.lodCameraPositionModel.x, 0, u.lodCameraPositionModel.z) * 0.0;
+    float3 p = float3(c.x + u.groundCenter.x, u.groundY, c.y + u.groundCenter.y);
     GroundOut o;
     o.positionModel = p;
     o.positionView = (u.modelView * float4(p, 1.0)).xyz;
@@ -57,7 +56,7 @@ fragment float4 groundFragment(GroundOut in [[stage_in]],
     float3 x = color * u.exposure;
     color = clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
     // 가장자리 페이드: 배경색으로
-    float dist = length(in.positionModel.xz) / u.groundRadius;
+    float dist = length(in.positionModel.xz - u.groundCenter) / u.groundRadius;
     float fade = 1.0 - smoothstep(0.35, 0.95, dist);
     float3 background = float3(0.11, 0.11, 0.13);
     return float4(mix(background, color, fade), 1.0);

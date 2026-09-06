@@ -84,6 +84,7 @@ typedef struct {
     float         groundY;             // 바닥 평면 높이 (모델 공간)
     float         groundRadius;        // 바닥 평면 반지름
     unsigned int  groundEnabled;
+    simd_float2   groundCenter;
 } Uniforms;
 
 /// SSAO 컴퓨트 유니폼

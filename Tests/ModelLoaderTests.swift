@@ -5,6 +5,45 @@ import simd
 @testable import MeshCore
 
 struct ModelLoaderTests {
+    @Test(arguments: ["Y", "Z"])
+    func respectsSceneUpAxisAndNodeTransforms(axis: String) async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("axis-\(UUID().uuidString).usda")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let scene = """
+        #usda 1.0
+        (upAxis = "\(axis)")
+        def Xform "Root" {
+            double3 xformOp:translate = (0, 0, 2)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+            def Mesh "Triangle" {
+                int[] faceVertexCounts = [3]
+                int[] faceVertexIndices = [0, 1, 2]
+                point3f[] points = [(0, 0, 0), (1, 0, 0), (0, 0, 1)]
+                normal3f[] normals = [(0, -1, 0), (0, -1, 0), (0, -1, 0)] (
+                    interpolation = "vertex"
+                )
+            }
+        }
+        """
+        try scene.write(to: url, atomically: true, encoding: .utf8)
+        let mesh = try await ModelLoader.load(url: url)
+        #expect(mesh.triangleCount == 1)
+        let expectedMin = axis == "Z" ? SIMD3<Float>(0, 2, 0) : SIMD3<Float>(0, 0, 2)
+        let expectedMax = axis == "Z" ? SIMD3<Float>(1, 3, 0) : SIMD3<Float>(1, 0, 3)
+        let expectedNormal = axis == "Z" ? SIMD3<Float>(0, 0, 1) : SIMD3<Float>(0, -1, 0)
+        #expect(simd_distance(mesh.boundsMin, expectedMin) < 1e-5)
+        #expect(simd_distance(mesh.boundsMax, expectedMax) < 1e-5)
+        #expect(mesh.vertices.allSatisfy { simd_distance($0.normal, expectedNormal) < 1e-5 })
+    }
+
+    @Test func elephantLoadsUpright() async throws {
+        let mesh = try await ModelLoader.load(url: try sampleURL("carved_wooden_elephant/carved_wooden_elephant_1k.usdc"))
+        #expect(mesh.triangleCount == 2_752)
+        #expect(abs(mesh.boundsMin.y - (-0.00060557446)) < 1e-5)
+        #expect(abs(mesh.boundsMax.y - 0.09554496) < 1e-5)
+        #expect(mesh.boundsMax.y - mesh.boundsMin.y > mesh.boundsMax.z - mesh.boundsMin.z)
+    }
+
     private func sampleURL(_ relative: String) throws -> URL {
         let samples = try #require(Bundle.main.url(forResource: "Samples", withExtension: nil))
         return samples.appendingPathComponent(relative)

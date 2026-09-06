@@ -21,7 +21,8 @@ mesh 스테이지가 살아남은 메시렛만 삼각형으로 펼칩니다.
 
 ## 기능
 
-- **모델 라이브러리** 화면: 번들 샘플 38개 자동 등록, 파일·폴더 임포터와 드래그&드롭으로 추가, 재시작 후에도 유지,
+- **좌표축 정규화**: Model I/O의 위쪽 축 정보를 Y-up으로 변환해 모델을 바로 세우고, 보정된 모델의 최저점과 중심에 바닥을 배치합니다. 축 정보가 없는 파일은 기본 Y-up을 유지합니다.
+- **모델 라이브러리** 화면: 번들 샘플 42개 자동 등록, 파일·폴더 임포터와 드래그&드롭으로 추가, 재시작 후에도 유지,
   항목별 썸네일(오프스크린 렌더, Documents/Thumbnails에 PNG 캐시)
 - **뷰어** 화면: 트랙볼 카메라(회전/줌/팬, 짐벌 락 없음), 표시 모드(셰이딩·메시렛 색·노멀), 컬링·오클루전·와이어프레임·텍스처 토글, 라이선스 정보 시트
 - **메시렛 컬링 3단**: 프러스텀(경계 구) → 노멀 콘(뒷면) → 2패스 Hi-Z 오클루전. 하단 통계 바에 그린/전체/가림 수와 GPU 시간 표시
@@ -233,7 +234,7 @@ PLAN.md                         단계별 계획과 진행 상태
 
 ## 샘플 모델 라이선스
 
-번들 모델 38개의 출처와 라이선스는 [`MetalMesh/Resources/Samples/MODELS.md`](MetalMesh/Resources/Samples/MODELS.md)와 각 폴더의 `LICENSE.txt`에 있습니다.
+번들 모델 42개의 출처와 라이선스는 [`MetalMesh/Resources/Samples/MODELS.md`](MetalMesh/Resources/Samples/MODELS.md)와 각 폴더의 `LICENSE.txt`에 있습니다.
 Stanford 스캔 모델은 비상업·출처 표기 조건, Sketchfab의 CC BY 모델(Laocoön by rigsters, Egyptian Cat by Ankledot, Skull by martinjario,
 Pliosaur by Spinnee, GameBoy by NoMoreFeelings, Cartoon Robot Dog by 3DWorkbench, Cleopatra Bust by yugengen)은 작성자 표기 조건입니다.
 Poly Haven 모델과 Sketchfab CC0 모델은 CC0입니다.

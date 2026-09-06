@@ -46,6 +46,14 @@ struct ThumbnailStoreTests {
         ModelEntry(id: UUID(), name: name, source: .imported(relativePath: "group/\(name).obj"), addedAt: Date(), fileSize: 0)
     }
 
+    @Test func uprightThumbnailsUseNewCacheKeys() throws {
+        let root = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = entry("elephant")
+        let store = ThumbnailStore(directory: root, fileURL: { _ in nil })
+        #expect(store.url(for: model).lastPathComponent == "\(model.id.uuidString)-y-up-v1.png")
+    }
+
     @Test func burstRequestsRunSeriallyAndDeduplicateActiveEntries() async throws {
         let root = try makeTempRoot()
         defer { try? FileManager.default.removeItem(at: root) }

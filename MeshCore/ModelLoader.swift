@@ -129,9 +129,17 @@ public enum ModelLoader {
                               boundsMax: SIMD3(repeating: -.greatestFiniteMagnitude))
         var materialCache = MaterialCache(assetDirectory: url.deletingLastPathComponent())
         var needsNormals = false
+        let upAxis = asset.upAxis
+        let upLength = simd_length(upAxis)
+        let axisTransform: float4x4
+        if upLength.isFinite, upLength > 1e-6 {
+            axisTransform = float4x4(simd_quatf(from: upAxis / upLength, to: SIMD3<Float>(0, 1, 0)))
+        } else {
+            axisTransform = matrix_identity_float4x4
+        }
 
         for index in 0..<asset.count {
-            visit(asset.object(at: index), parentTransform: matrix_identity_float4x4, into: &merged,
+            visit(asset.object(at: index), parentTransform: axisTransform, into: &merged,
                   materials: &materialCache, needsNormals: &needsNormals)
         }
         guard !merged.indices.isEmpty else { throw ModelLoaderError.noTriangles }

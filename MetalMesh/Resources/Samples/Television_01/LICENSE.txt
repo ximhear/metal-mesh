@@ -1,0 +1,8 @@
+Television 01 by Gabriel Radić
+Source: https://polyhaven.com/a/Television_01
+License: CC0 1.0 Universal
+https://creativecommons.org/publicdomain/zero/1.0/
+https://polyhaven.com/license
+
+Original USDC model and 1k PBR textures from Poly Haven.
+PNG normal and JPG metallic maps replace EXR downloads for loader compatibility.

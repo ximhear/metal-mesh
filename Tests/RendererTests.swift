@@ -10,6 +10,24 @@ import simd
 struct RendererTests {
     private var device: MTLDevice? { MTLCreateSystemDefaultDevice() }
 
+    @Test func groundFollowsUprightTranslatedModel() async throws {
+        let device = try #require(device)
+        let samples = try #require(Bundle.main.url(forResource: "Samples", withExtension: nil))
+        var mesh = try await ModelLoader.load(url: samples.appendingPathComponent("carved_wooden_elephant/carved_wooden_elephant_1k.usdc"))
+        let offset = SIMD3<Float>(3, 4, -5)
+        for index in mesh.vertices.indices { mesh.vertices[index].position += offset }
+        mesh.boundsMin += offset
+        mesh.boundsMax += offset
+        let renderer = try Renderer(device: device, mesh: MeshletBuilder.build(mesh), materials: mesh.materials)
+        #expect(abs(renderer.groundPosition.x - mesh.boundsCenter.x) < 1e-5)
+        #expect(abs(renderer.groundPosition.z - mesh.boundsCenter.z) < 1e-5)
+        #expect(abs(renderer.groundPosition.y - (mesh.boundsMin.y - mesh.boundsRadius * 0.002)) < 1e-5)
+        #expect(renderer.groundPosition.y < mesh.boundsMin.y)
+        renderer.settings.groundEnabled = true
+        renderer.camera.frame(center: mesh.boundsCenter, radius: mesh.boundsRadius)
+        #expect(renderer.snapshot(width: 320, height: 240) != nil)
+    }
+
     private func makeGridMesh(_ n: Int) -> MeshData {
         var vertices: [Vertex] = []
         for y in 0...n {

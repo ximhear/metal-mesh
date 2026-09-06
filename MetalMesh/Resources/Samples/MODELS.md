@@ -40,3 +40,10 @@
 | GameBoy | https://sketchfab.com/3d-models/d1f396eae44141058ec945234af36b16 (NoMoreFeelings) | CC BY 4.0 — 작성자 표기 의무 | usdz | 6,938 |
 | Cartoon Robot Dog | https://sketchfab.com/3d-models/745c8026934a450fb4c8c99568463860 (3DWorkbench) | CC BY 4.0 — 작성자 표기 의무 | usdz | 17,306 |
 | Cleopatra Bust | https://sketchfab.com/3d-models/701c2c9fa574492fad0d6b6b2348e740 (yugengen) | CC BY 4.0 — 작성자 표기 의무 | usdz | 33,668 |
+| Chess Set | https://polyhaven.com/a/chess_set (Riley Queen) | CC0 1.0 | usdc + 1k 텍스처 (재질 3개) | 76,920 |
+| Carved Wooden Elephant | https://polyhaven.com/a/carved_wooden_elephant (Greg Zaal) | CC0 1.0 | usdc + 1k 텍스처 | 2,752 |
+| Television 01 | https://polyhaven.com/a/Television_01 (Gabriel Radić) | CC0 1.0 | usdc + 1k 텍스처 | 1,918 |
+| Food Pomegranate 01 | https://polyhaven.com/a/food_pomegranate_01 (Oliver Harries) | CC0 1.0 | usdc + 1k 텍스처 | 8,142 |
+
+추가 샘플의 `ModelLoader` 정점 용접 후 정점 수: Chess Set 48,040개, Carved Wooden Elephant 1,664개,
+Television 01 1,976개, Food Pomegranate 01 4,593개. 네 모델 모두 baseColor·normal·roughness 맵과 LOD 생성을 확인했습니다.

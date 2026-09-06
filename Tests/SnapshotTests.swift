@@ -25,6 +25,7 @@ struct SnapshotTests {
     }
 
     static let shots: [Shot] = [
+        Shot(file: "carved_wooden_elephant/carved_wooden_elephant_1k.usdc", name: "elephant-upright", mode: .shaded, extras: true),
         Shot(file: "stanford-bunny/stanford-bunny.obj", name: "bunny-shaded", mode: .shaded),
         Shot(file: "stanford-bunny/stanford-bunny.obj", name: "bunny-meshlets", mode: .meshlets),
         Shot(file: "lion-noe3d/lion-noe3d.usdz", name: "lion-shaded", mode: .shaded, yaw: 2.4, pitch: 0.25),

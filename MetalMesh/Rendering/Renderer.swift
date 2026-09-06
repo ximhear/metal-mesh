@@ -59,6 +59,10 @@ final class Renderer: NSObject, MTKViewDelegate {
     private let sceneCenter: SIMD3<Float>
     private let sceneRadius: Float
     private let sceneMinY: Float
+
+    var groundPosition: SIMD3<Float> {
+        SIMD3(sceneCenter.x, sceneMinY - sceneRadius * 0.002, sceneCenter.z)
+    }
     /// 표면 → 태양 방향 (모델 공간, 정규화)
     let sunDirection = simd_normalize(SIMD3<Float>(0.45, 1.0, 0.35))
     static let shadowMapSize = 2048
@@ -652,7 +656,8 @@ final class Renderer: NSObject, MTKViewDelegate {
         u.sunIntensity = settings.iblEnabled && environment != nil ? 1.6 : 0
         u.shadowsEnabled = settings.shadowsEnabled ? 1 : 0
         u.shadowBias = 0.0015
-        u.groundY = sceneMinY - sceneRadius * 0.002
+        u.groundY = groundPosition.y
+        u.groundCenter = SIMD2(groundPosition.x, groundPosition.z)
         u.groundRadius = sceneRadius * 8
         u.groundEnabled = settings.groundEnabled ? 1 : 0
         let planes = Math.frustumPlanes(from: viewProjection)
