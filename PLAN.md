@@ -158,6 +158,16 @@ xcodebuild -project MetalMesh.xcodeproj -scheme MetalMesh -destination 'platform
 - [ ] 실기기(iPhone/iPad)에서 성능 확인
 - **완료 기준**: 카메라를 돌리면 컬링된 메시렛 수가 변하고 화면 결함 없음
 
+### Phase 6 — 렌더링 기법 (2026-09-06 시작)
+- [x] **2패스 Hi-Z 오클루전 컬링**: 가시성 비트 버퍼, 깊이→r32Float 밉 피라미드(컴퓨트 max 축소), 경계 구 AABB 투영 + 3×3 샘플.
+  컬링률 dragon 15.4→31.6%, 사자 23.2→43.8% (128px 타깃). 두 패스 결과가 단일 패스와 픽셀 동일함을 테스트로 고정
+- [x] 트랙볼 카메라 (쿼터니언, 짐벌 락 제거)
+- [ ] PBR + IBL (HDRI 환경광, 러프니스·메탈릭·노멀 맵) — Poly Haven 텍스처가 이미 있음
+- [ ] 클러스터 LOD (메시렛 그룹 단순화 DAG, 화면 오차 기준 GPU 선택)
+- [ ] MetalFX 업스케일링, MSAA
+- [ ] 그림자(섀도 맵), SSAO
+- 메모: Hi-Z 밉 레벨은 `ceil(log2(사각형 px)) - 1`에서 3×3 샘플. 귀퉁이 4개만 읽으면 텍셀이 사각형의 2배까지 커져 배경 깊이를 포함해 컬링이 거의 안 됨
+
 ### Phase 5 — 마무리
 - [x] **baseColor 텍스처** (2026-09-06): ModelLoader가 서브메시 재질에서 텍스처/색 추출(텍스처 우선, usdz는 loadTextures),
   MeshletBuilder가 재질별로 묶고 `Meshlet.materialIndex` 기록, GPUMesh가 sRGB 밉맵 텍스처 + `Material` 인자 버퍼(리소스 ID) 생성,

@@ -21,29 +21,89 @@ static bool coneBackfacing(constant Uniforms& u, Meshlet m) {
     return dot(toCenter, m.coneAxis) >= m.coneCutoff * dist + m.boundsRadius;
 }
 
+/// 경계 구를 화면 공간 사각형으로 투영해 Hi-Z(최대 깊이) 피라미드와 비교한다. true면 완전히 가려짐.
+static bool occludedByHiZ(constant Uniforms& u, texture2d<float> hiz, float3 center, float radius) {
+    constexpr sampler hizSampler(coord::normalized, filter::nearest, mip_filter::nearest, address::clamp_to_edge);
+    float2 ndcMin = float2( 1e30);
+    float2 ndcMax = float2(-1e30);
+    float minDepth = 1e30;
+    // 구의 AABB 8꼭짓점을 투영 (보수적). 한 점이라도 카메라 뒤/근평면 앞이면 컬링하지 않는다.
+    for (int i = 0; i < 8; ++i) {
+        float3 corner = center + radius * float3((i & 1) ? 1.0 : -1.0, (i & 2) ? 1.0 : -1.0, (i & 4) ? 1.0 : -1.0);
+        float4 clip = u.modelViewProjection * float4(corner, 1.0);
+        if (clip.w <= 1e-5) return false;
+        float3 ndc = clip.xyz / clip.w;
+        ndcMin = min(ndcMin, ndc.xy);
+        ndcMax = max(ndcMax, ndc.xy);
+        minDepth = min(minDepth, ndc.z);
+    }
+    if (minDepth <= 0.0) return false;
+    // NDC(y 위) → UV(y 아래)
+    float2 uvMin = clamp(float2(ndcMin.x, -ndcMax.y) * 0.5 + 0.5, 0.0, 1.0);
+    float2 uvMax = clamp(float2(ndcMax.x, -ndcMin.y) * 0.5 + 0.5, 0.0, 1.0);
+    float2 sizePx = (uvMax - uvMin) * float2(u.hizSize);
+    // 텍셀 크기가 사각형의 절반 이상인 밉을 고르면 사각형은 축마다 최대 3텍셀에 걸친다.
+    // 3×3 샘플(귀퉁이 + 중점)로 겹치는 텍셀을 모두 읽는다 → 보수적이면서 귀퉁이 4개만 읽을 때보다 2배 정밀.
+    float lvl = clamp(ceil(log2(max(max(sizePx.x, sizePx.y), 1.0))) - 1.0, 0.0, float(u.hizMipCount - 1));
+    float2 uvMid = (uvMin + uvMax) * 0.5;
+    float d = 0.0;
+    for (int y = 0; y < 3; ++y) {
+        for (int x = 0; x < 3; ++x) {
+            float2 uv = float2(x == 0 ? uvMin.x : (x == 1 ? uvMid.x : uvMax.x),
+                               y == 0 ? uvMin.y : (y == 1 ? uvMid.y : uvMax.y));
+            d = max(d, hiz.sample(hizSampler, uv, level(lvl)).r);
+        }
+    }
+    return minDepth > d;   // 구의 가장 가까운 점이 그 영역의 가장 먼 가림막보다 뒤에 있다
+}
+
 [[object, max_total_threads_per_threadgroup(OBJECT_THREADS_PER_THREADGROUP),
           max_total_threadgroups_per_mesh_grid(OBJECT_THREADS_PER_THREADGROUP)]]
 void objectMain(object_data MeshletPayload& payload [[payload]],
                 mesh_grid_properties grid,
                 constant Uniforms& u                [[buffer(BUFFER_UNIFORMS)]],
                 const device Meshlet* meshlets      [[buffer(BUFFER_MESHLETS)]],
-                device atomic_uint* visibleCounter  [[buffer(BUFFER_STATS)]],
+                device atomic_uint* stats           [[buffer(BUFFER_STATS)]],
+                constant uint& cullPass             [[buffer(BUFFER_CULL_PASS)]],
+                device uint* visibility             [[buffer(BUFFER_VISIBILITY)]],
+                texture2d<float> hiz                [[texture(TEXTURE_HIZ)]],
                 uint tid [[thread_index_in_threadgroup]],
                 uint gid [[thread_position_in_grid]])
 {
     threadgroup atomic_uint count;
-    if (tid == 0) atomic_store_explicit(&count, 0u, memory_order_relaxed);
+    threadgroup atomic_uint occluded;
+    if (tid == 0) {
+        atomic_store_explicit(&count, 0u, memory_order_relaxed);
+        atomic_store_explicit(&occluded, 0u, memory_order_relaxed);
+    }
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    bool visible = false;
+    bool draw = false;
     if (gid < u.meshletCount) {
         Meshlet m = meshlets[gid];
-        visible = true;
+        bool inView = true;
         if (u.cullingEnabled) {
-            visible = insideFrustum(u, m.boundsCenter, m.boundsRadius) && !coneBackfacing(u, m);
+            inView = insideFrustum(u, m.boundsCenter, m.boundsRadius) && !coneBackfacing(u, m);
+        }
+        switch (cullPass) {
+            case CULL_PASS_FIRST:
+                draw = inView && visibility[gid] != 0u;
+                break;
+            case CULL_PASS_SECOND: {
+                bool drawnInFirst = visibility[gid] != 0u && inView;
+                bool occ = inView && occludedByHiZ(u, hiz, m.boundsCenter, m.boundsRadius);
+                if (occ) atomic_fetch_add_explicit(&occluded, 1u, memory_order_relaxed);
+                bool nowVisible = inView && !occ;
+                draw = nowVisible && !drawnInFirst;      // 1패스에서 그린 것은 다시 그리지 않는다
+                visibility[gid] = nowVisible ? 1u : 0u;  // 다음 프레임 1패스용
+                break;
+            }
+            default:
+                draw = inView;
+                break;
         }
     }
-    if (visible) {
+    if (draw) {
         uint slot = atomic_fetch_add_explicit(&count, 1u, memory_order_relaxed);
         payload.meshletIndices[slot] = gid;
     }
@@ -51,8 +111,10 @@ void objectMain(object_data MeshletPayload& payload [[payload]],
 
     if (tid == 0) {
         uint total = atomic_load_explicit(&count, memory_order_relaxed);
+        uint occ = atomic_load_explicit(&occluded, memory_order_relaxed);
         grid.set_threadgroups_per_grid(uint3(total, 1, 1));
-        if (total > 0) atomic_fetch_add_explicit(visibleCounter, total, memory_order_relaxed);
+        if (total > 0) atomic_fetch_add_explicit(&stats[STAT_DRAWN], total, memory_order_relaxed);
+        if (occ > 0) atomic_fetch_add_explicit(&stats[STAT_OCCLUDED], occ, memory_order_relaxed);
     }
 }
 

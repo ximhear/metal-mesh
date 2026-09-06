@@ -46,7 +46,20 @@ typedef struct {
     unsigned int  debugMode;           // DebugMode: 0 셰이딩, 1 메시렛 색, 2 노멀
     unsigned int  cullingEnabled;
     unsigned int  texturesEnabled;
+    simd_uint2    hizSize;             // Hi-Z 밉 0 크기 (픽셀)
+    unsigned int  hizMipCount;
+    unsigned int  occlusionEnabled;
 } Uniforms;
+
+/// 컬링 패스 종류 (object 스테이지 setObjectBytes로 전달)
+#define CULL_PASS_SINGLE 0   // 오클루전 없이 한 번에
+#define CULL_PASS_FIRST  1   // 지난 프레임에 보였던 메시렛만 그린다
+#define CULL_PASS_SECOND 2   // 나머지를 Hi-Z로 테스트해 새로 보이는 것만 그린다, 가시성 비트 갱신
+
+/// 통계 버퍼 레이아웃 (atomic uint)
+#define STAT_DRAWN    0      // 이 프레임에 그린 메시렛 수 (두 패스 합)
+#define STAT_OCCLUDED 1      // Hi-Z 테스트로 제거된 메시렛 수
+#define STAT_COUNT    2
 
 /// 재질. Metal 3 인자 버퍼(tier 2)에 그대로 놓인다. 48바이트.
 /// MSL에서는 texture2d가 8바이트 리소스 ID로 저장되므로 C 쪽은 MTLResourceID와 같은 8바이트로 맞춘다.
@@ -72,7 +85,10 @@ typedef struct {
 #define BUFFER_UNIFORMS          0
 #define BUFFER_MESHLETS          1
 #define BUFFER_MATERIALS         1   // fragment 전용: Material 배열 (인자 버퍼)
-#define BUFFER_STATS             2   // object 전용: atomic uint (보이는 메시렛 수)
+#define BUFFER_STATS             2   // object 전용: atomic uint[STAT_COUNT]
+#define BUFFER_CULL_PASS         3   // object 전용: uint (CULL_PASS_*)
+#define BUFFER_VISIBILITY        4   // object 전용: uint[meshletCount], 지난 프레임 가시성
+#define TEXTURE_HIZ              0   // object 전용: r32Float 밉 피라미드 (max depth)
 #define BUFFER_VERTICES          2   // mesh 전용
 #define BUFFER_MESHLET_VERTICES  3
 #define BUFFER_MESHLET_TRIANGLES 4

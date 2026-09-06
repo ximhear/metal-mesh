@@ -21,7 +21,8 @@ mesh 스테이지가 살아남은 메시렛만 삼각형으로 펼칩니다.
 
 - **모델 라이브러리** 화면: 번들 샘플 25개 자동 등록, 파일 임포터·드래그&드롭으로 추가, 재시작 후에도 유지,
   항목별 썸네일(오프스크린 렌더, Documents/Thumbnails에 PNG 캐시)
-- **뷰어** 화면: 오빗 카메라(회전/줌/팬), 표시 모드(셰이딩·메시렛 색·노멀), 컬링·와이어프레임·텍스처 토글, 라이선스 정보 시트
+- **뷰어** 화면: 트랙볼 카메라(회전/줌/팬, 짐벌 락 없음), 표시 모드(셰이딩·메시렛 색·노멀), 컬링·오클루전·와이어프레임·텍스처 토글, 라이선스 정보 시트
+- **메시렛 컬링 3단**: 프러스텀(경계 구) → 노멀 콘(뒷면) → 2패스 Hi-Z 오클루전. 하단 통계 바에 그린/전체/가림 수와 GPU 시간 표시
 - **baseColor 텍스처**: OBJ(.mtl), USDC(외부 파일), USDZ(내장) 재질에서 추출. 서브메시별 재질을 메시렛 단위로 유지하고
   Metal 3 인자 버퍼(`MTLResourceID`)로 프래그먼트에서 직접 샘플링
 - 하단 통계: 보이는 메시렛 / 전체 메시렛, 삼각형 수, GPU 프레임 시간
@@ -41,7 +42,7 @@ mesh 스테이지가 살아남은 메시렛만 삼각형으로 펼칩니다.
      ──▶ GPUMesh                      vertices / meshlets / meshletVertices / meshletTriangles 버퍼
                                       텍스처(sRGB, 밉맵) + Material 인자 버퍼(리소스 ID)
      ──▶ drawMeshThreadgroups
-            object 스테이지  스레드 1개 = 메시렛 1개. 프러스텀·콘 컬링 → 살아남은 인덱스를 페이로드에 압축
+            object 스테이지  스레드 1개 = 메시렛 1개. 프러스텀·콘·Hi-Z 오클루전 컬링 → 살아남은 인덱스를 페이로드에 압축
                              set_threadgroups_per_grid(살아남은 수), atomic 카운터로 통계
             mesh 스테이지    스레드그룹 1개 = 메시렛 1개. set_vertex / set_index / set_primitive(meshletID)
             fragment         Material[materialIndex]의 텍스처 샘플링, 2광원 + 스펙큘러, 디버그 모드별 색상
@@ -54,13 +55,25 @@ Swift와 MSL은 `MeshCore/include/ShaderTypes.h` 한 파일에서 `Vertex`, `Mes
 `-Onone`에서는 클러스터링이 약 50배 느려(bunny 2.1s vs 40ms) 뷰어 로딩과 썸네일 생성이 체감될 정도로 지연되기 때문입니다.
 앱 본체는 `-Onone`이라 그대로 디버깅할 수 있습니다.
 
-메시렛 클러스터링 효과 (6방향 평균 컬링률, Morton 스캔 → 클러스터):
+### 2패스 Hi-Z 오클루전 컬링
 
-| 모델 | 삼각형 | 메시렛 | 컬링률 | 평균 경계 구 반지름 |
-|---|---|---|---|---|
-| Stanford Bunny | 69k | 882 → 874 | 21% → 33% | 0.0109 → 0.0067 |
-| XYZ RGB Dragon | 250k | 3,220 → 3,181 | 4.6% → 15.4% | 5.12 → 3.12 |
-| Löwe (사자 석상) | 491k | 7,541 → 7,592 | 11.6% → 23.2% | 3.34 → 2.19 |
+```
+1패스  지난 프레임에 보였던 메시렛만 그린다 (가시성 비트 버퍼)
+Hi-Z   깊이 버퍼 → r32Float 밉 피라미드 (컴퓨트, 2×2 max 축소 = 가장 먼 가림막)
+2패스  나머지 메시렛의 경계 구 AABB 8꼭짓점을 투영 → 화면 사각형 → 사각형/2 이상 텍셀 밉에서 3×3 샘플
+       구의 가장 가까운 깊이 > 샘플 최대 깊이 → 가려짐. 새로 보이는 것만 그리고 가시성 비트 갱신
+```
+
+가시성 비트 덕분에 카메라가 움직여도 팝이 없고, 두 패스를 합친 결과는 오클루전 없이 그린 것과 픽셀 단위로 같습니다
+(`hiZOcclusionKeepsBunnyImageIdentical` 테스트). 근평면을 걸치는 구는 컬링하지 않습니다.
+
+컬링 효과 (6방향 평균, 128px 타깃 기준. 실제 화면에선 Hi-Z가 더 정밀해 오클루전 효과가 커집니다):
+
+| 모델 | 삼각형 | 메시렛 (스캔 → 클러스터) | 프러스텀+콘 (스캔 → 클러스터) | + Hi-Z 오클루전 | 평균 경계 구 반지름 |
+|---|---|---|---|---|---|
+| Stanford Bunny | 69k | 882 → 874 | 21% → 33% | 38% | 0.0109 → 0.0067 |
+| XYZ RGB Dragon | 250k | 3,220 → 3,181 | 4.6% → 15.4% | 32% | 5.12 → 3.12 |
+| Löwe (사자 석상) | 491k | 7,541 → 7,592 | 11.6% → 23.2% | 44% | 3.34 → 2.19 |
 
 ## 요구 사항
 
@@ -84,7 +97,7 @@ open MetalMesh.xcodeproj
 명령줄:
 
 ```bash
-# macOS 빌드 + 테스트 (50개)
+# macOS 빌드 + 테스트 (55개)
 xcodebuild -project MetalMesh.xcodeproj -scheme MetalMesh -destination 'platform=macOS' \
   -derivedDataPath build/DerivedData test
 
@@ -118,10 +131,10 @@ MeshCore/                       메시 처리 프레임워크 (Debug에서도 -O
 MetalMesh/
   App/                          진입점, 기기 지원 검사, 미지원 안내
   Library/                      ModelEntry, ModelLibrary(JSON 인덱스 + Documents/Models), ThumbnailStore, 리스트 화면
-  Rendering/                    Renderer, GPUMesh(버퍼·텍스처·재질), RenderSettings, Snapshot, Shaders/
+  Rendering/                    Renderer(2패스 오클루전, Hi-Z 빌드), GPUMesh, RenderSettings, Snapshot, Shaders/(MeshShaders, HiZ)
   Viewer/                       ModelViewerView, MetalView(제스처), OrbitCamera
   Resources/Samples/            번들 샘플 모델 + 폴더별 LICENSE.txt + MODELS.md
-Tests/                          Swift Testing 50개 (레이아웃, 라이브러리, 썸네일, 로더·재질, glTF, 메시렛, 오프스크린 렌더)
+Tests/                          Swift Testing 55개 (레이아웃, 라이브러리, 썸네일, 로더·재질, glTF, 메시렛, 오프스크린 렌더)
 scripts/probe-model.swift       Model I/O 로드 검증 CLI
 scripts/bench-meshlets.swift    메시렛 빌더 벤치마크 (-O CLI)
 .claude/skills/fetch-3d-model/  무료 소스(Poly Haven, Sketchfab, Poly Pizza, GitHub 테스트 메시)에서 모델을 받는 절차
@@ -134,6 +147,7 @@ PLAN.md                         단계별 계획과 진행 상태
   (`Sdf_GetExtension` 널 포인터). 모든 Model I/O 호출은 `ModelIOQueue` 액터로 직렬화합니다.
 - Model I/O는 노멀이 없는 OBJ에 `addNormals`를 쓰면 면마다 정점을 쪼갭니다(bunny 35k → 208k 정점). 로더는 대신 정점을 용접하고 스무스 노멀을 직접 계산합니다.
   정점 공유가 없으면 메시렛이 정점 64개 한계에 걸려 삼각형 21개씩만 담기고 인접 기반 클러스터링도 불가능합니다.
+- MTKView 깊이 텍스처는 기본적으로 셰이더에서 읽을 수 없어 `depthStencilAttachmentTextureUsage`에 `shaderRead`를 더하고 메모리리스가 아니어야 Hi-Z를 만들 수 있습니다.
 - 래스터라이저 컬링은 끄고(`cullMode = .none`) 뒷면 제거는 object 스테이지의 노멀 콘이 담당합니다. 와인딩이 뒤집힌 파일도 보이게 하기 위함입니다.
 - 재질은 baseColor만 씁니다(노멀·러프니스 맵 무시). USD 재질에는 baseColor 의미 속성이 여러 개일 수 있어(상수 `baseColor` + 텍스처 `diffuseColor`) 텍스처가 있는 쪽을 우선합니다. USDZ 내장 텍스처는 `MDLAsset.loadTextures()` 뒤에만 읽힙니다.
 - Model I/O UV는 좌하단 원점이라 셰이더에서 v를 뒤집어 샘플링합니다.
@@ -146,7 +160,11 @@ PLAN.md                         단계별 계획과 진행 상태
 - [x] 리스트 썸네일(오프스크린 렌더 재사용)
 - [x] 삼각형 전용 최소 GLB 로더
 - [x] 메시렛 클러스터링 품질 개선(meshoptimizer 방식)
-- [ ] LOD
+- [x] 2패스 Hi-Z 오클루전 컬링
+- [ ] PBR + IBL, 노멀 매핑
+- [ ] 클러스터 LOD (Nanite식)
+- [ ] MetalFX 업스케일링, MSAA
+- [ ] 그림자, SSAO
 - [ ] iPhone/iPad 실기기 성능 측정
 
 ## 샘플 모델 라이선스

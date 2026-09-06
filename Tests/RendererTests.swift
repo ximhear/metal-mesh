@@ -40,7 +40,7 @@ struct RendererTests {
         colorDesc.usage = [.renderTarget, .shaderRead]
         colorDesc.storageMode = .shared
         let depthDesc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: Renderer.depthPixelFormat, width: size, height: size, mipmapped: false)
-        depthDesc.usage = .renderTarget
+        depthDesc.usage = [.renderTarget, .shaderRead]
         depthDesc.storageMode = .private
         let color = try #require(device.makeTexture(descriptor: colorDesc))
         let depth = try #require(device.makeTexture(descriptor: depthDesc))
@@ -130,6 +130,7 @@ struct RendererTests {
         for mode in DebugMode.allCases {
             renderer.settings.debugMode = mode
             renderer.settings.cullingEnabled = false
+            renderer.settings.occlusionEnabled = false
             let all = renderer.renderFrame(passDescriptor: target.pass, drawable: nil, waitUntilCompleted: true)
             #expect(all == meshlets.meshlets.count)
         }
@@ -196,23 +197,106 @@ struct RendererTests {
                 let renderer = try Renderer(device: device, mesh: meshlets, materials: mesh.materials)
                 renderer.camera.frame(center: mesh.boundsCenter, radius: mesh.boundsRadius)
                 var visibleSum = 0
+                var occlusionDrawnSum = 0
                 let views = 6
                 for i in 0..<views {
                     renderer.camera.yaw = Float(i) / Float(views) * 2 * .pi
+                    renderer.settings.occlusionEnabled = false
                     visibleSum += renderer.renderFrame(passDescriptor: target.pass, drawable: nil, waitUntilCompleted: true) ?? 0
+                    // 오클루전: 비트를 초기화하고 2프레임 그린 뒤(안정 상태) 그린 수를 잰다
+                    renderer.settings.occlusionEnabled = true
+                    renderer.resetVisibility()
+                    renderer.renderFrame(passDescriptor: target.pass, drawable: nil, waitUntilCompleted: true)
+                    occlusionDrawnSum += renderer.renderFrame(passDescriptor: target.pass, drawable: nil, waitUntilCompleted: true) ?? 0
                 }
                 let culled = 1 - Double(visibleSum) / Double(meshlets.meshlets.count * views)
+                let culledWithOcclusion = 1 - Double(occlusionDrawnSum) / Double(meshlets.meshlets.count * views)
                 let radius = meshlets.meshlets.map(\.boundsRadius).reduce(0, +) / Float(meshlets.meshlets.count)
                 let cutoff = meshlets.meshlets.map(\.coneCutoff).reduce(0, +) / Float(meshlets.meshlets.count)
                 report[name] = (meshlets.meshlets.count, culled, radius, cutoff, ms)
-                print(String(format: "STRATEGY %@ %@: meshlets=%d culled=%.1f%% meanRadius=%.4f meanCutoff=%.3f build=%.0fms",
-                             (file as NSString).lastPathComponent, name, meshlets.meshlets.count, culled * 100, radius, cutoff, ms))
+                print(String(format: "STRATEGY %@ %@: meshlets=%d culled=%.1f%% +occlusion=%.1f%% meanRadius=%.4f meanCutoff=%.3f build=%.0fms",
+                             (file as NSString).lastPathComponent, name, meshlets.meshlets.count, culled * 100, culledWithOcclusion * 100, radius, cutoff, ms))
+                #expect(culledWithOcclusion >= culled - 0.001, "\(file) \(name): 오클루전이 그리는 수를 늘리면 안 된다")
             }
             let scan = try #require(report["spatialScan"]), cluster = try #require(report["cluster"])
             #expect(cluster.count <= Int(Double(scan.count) * 1.25), "\(file): 메시렛 수가 스캔 대비 25% 이상 늘면 안 된다")
             #expect(cluster.culled >= scan.culled, "\(file): 컬링률은 좋아져야 한다")
             #expect(cluster.radius <= scan.radius, "\(file): 경계 구가 작아져야 한다")
         }
+    }
+
+    /// z 위치가 다른 평면 두 장. 앞 평면이 뒤 평면을 완전히 가린다.
+    private func makeTwoPlanes(_ n: Int) -> MeshData {
+        var front = makeGridMesh(n)                       // z = 0, 카메라(+z)에서 가까움
+        var back = makeGridMesh(n)
+        for i in back.vertices.indices {
+            // 경계 구(AABB 8꼭짓점)를 투영해도 앞 평면 화면 영역 안에 머물도록 충분히 작고 가깝게
+            back.vertices[i].position *= SIMD3(0.3, 0.3, 1)
+            back.vertices[i].position.z = -0.3
+        }
+        let base = UInt32(front.vertices.count)
+        front.vertices += back.vertices
+        front.indices += back.indices.map { $0 + base }
+        front.boundsMin = SIMD3(-0.5, -0.5, -0.3)
+        front.boundsMax = SIMD3(0.5, 0.5, 0)
+        return front
+    }
+
+    @Test func hiZOcclusionCullsHiddenPlane() throws {
+        let device = try #require(self.device)
+        let mesh = makeTwoPlanes(8)
+        let meshlets = MeshletBuilder.build(mesh, maxVertices: 32, maxTriangles: 40)
+        let renderer = try Renderer(device: device, mesh: meshlets)
+        renderer.camera.frame(center: mesh.boundsCenter, radius: mesh.boundsRadius)
+        renderer.camera.yaw = 0
+        renderer.camera.pitch = 0
+        renderer.settings.cullingEnabled = false   // 콘 컬링 배제, 오클루전만 본다
+        let target = try makeTarget(device: device)
+
+        renderer.settings.occlusionEnabled = false
+        let all = renderer.renderFrame(passDescriptor: target.pass, drawable: nil, waitUntilCompleted: true)
+        #expect(all == meshlets.meshlets.count)
+        let referenceCoverage = coverage(of: target)
+
+        renderer.settings.occlusionEnabled = true
+        // 1프레임: 1패스가 전부 그리고 2패스가 비트 정리 → 2프레임부터 뒤 평면이 빠진다
+        renderer.renderFrame(passDescriptor: target.pass, drawable: nil, waitUntilCompleted: true)
+        let drawn = try #require(renderer.renderFrame(passDescriptor: target.pass, drawable: nil, waitUntilCompleted: true))
+        let backMeshlets = meshlets.meshlets.filter { $0.boundsCenter.z < -0.15 }.count
+        #expect(backMeshlets > 0)
+        #expect(renderer.stats.occludedMeshletCount == backMeshlets, "뒤 평면 메시렛 전부가 가려져야 한다: \(renderer.stats.occludedMeshletCount) vs \(backMeshlets)")
+        #expect(drawn == meshlets.meshlets.count - backMeshlets)
+        #expect(abs(coverage(of: target) - referenceCoverage) < 0.002, "가려진 것만 빠졌으니 이미지는 같아야 한다")
+    }
+
+    @Test func hiZOcclusionKeepsBunnyImageIdentical() async throws {
+        let device = try #require(self.device)
+        let samples = try #require(Bundle.main.url(forResource: "Samples", withExtension: nil))
+        let mesh = try await ModelLoader.load(url: samples.appendingPathComponent("stanford-bunny/stanford-bunny.obj"))
+        let renderer = try Renderer(device: device, mesh: MeshletBuilder.build(mesh))
+        renderer.camera.frame(center: mesh.boundsCenter, radius: mesh.boundsRadius)
+        let target = try makeTarget(device: device)
+        func pixels() -> [UInt8] {
+            var px = [UInt8](repeating: 0, count: target.size * target.size * 4)
+            target.color.getBytes(&px, bytesPerRow: target.size * 4, from: MTLRegionMake2D(0, 0, target.size, target.size), mipmapLevel: 0)
+            return px
+        }
+        renderer.settings.occlusionEnabled = false
+        let visibleNoOcclusion = try #require(renderer.renderFrame(passDescriptor: target.pass, drawable: nil, waitUntilCompleted: true))
+        let reference = pixels()
+
+        renderer.settings.occlusionEnabled = true
+        renderer.renderFrame(passDescriptor: target.pass, drawable: nil, waitUntilCompleted: true)
+        let drawn = try #require(renderer.renderFrame(passDescriptor: target.pass, drawable: nil, waitUntilCompleted: true))
+        let occluded = pixels()
+        #expect(renderer.stats.occludedMeshletCount > 0, "닫힌 메시라 뒷면 일부는 콘을 통과해도 가려져야 한다")
+        #expect(drawn < visibleNoOcclusion)
+        var differing = 0
+        for i in stride(from: 0, to: reference.count, by: 4) {
+            if abs(Int(reference[i]) - Int(occluded[i])) > 2 || abs(Int(reference[i + 1]) - Int(occluded[i + 1])) > 2 || abs(Int(reference[i + 2]) - Int(occluded[i + 2])) > 2 { differing += 1 }
+        }
+        let ratio = Double(differing) / Double(target.size * target.size)
+        #expect(ratio < 0.002, "오클루전은 보이는 픽셀을 바꾸면 안 된다 (다른 픽셀 비율 \(ratio))")
     }
 
     @Test func frustumPlanesContainCameraTarget() {

@@ -13,6 +13,7 @@ final class ViewerStatsModel {
     var materialCount = 0
     var textureCount = 0
     var visibleMeshletCount = 0
+    var occludedMeshletCount = 0
     var gpuTime: Double = 0
 
     func apply(_ stats: RenderStats) {
@@ -23,12 +24,13 @@ final class ViewerStatsModel {
         if materialCount != stats.materialCount { materialCount = stats.materialCount }
         if textureCount != stats.textureCount { textureCount = stats.textureCount }
         if visibleMeshletCount != stats.visibleMeshletCount { visibleMeshletCount = stats.visibleMeshletCount }
+        if occludedMeshletCount != stats.occludedMeshletCount { occludedMeshletCount = stats.occludedMeshletCount }
         if gpuTime != stats.gpuTime { gpuTime = stats.gpuTime }
     }
 
     var snapshot: RenderStats {
-        RenderStats(meshletCount: meshletCount, visibleMeshletCount: visibleMeshletCount, triangleCount: triangleCount,
-                    vertexCount: vertexCount, materialCount: materialCount, textureCount: textureCount, gpuTime: gpuTime)
+        RenderStats(meshletCount: meshletCount, visibleMeshletCount: visibleMeshletCount, occludedMeshletCount: occludedMeshletCount,
+                    triangleCount: triangleCount, vertexCount: vertexCount, materialCount: materialCount, textureCount: textureCount, gpuTime: gpuTime)
     }
 }
 
@@ -84,6 +86,7 @@ struct ModelViewerView: View {
                 }
                 .pickerStyle(.segmented)
                 Toggle(isOn: $settings.cullingEnabled) { Label("컬링", systemImage: "scissors") }
+                Toggle(isOn: $settings.occlusionEnabled) { Label("오클루전", systemImage: "eye.slash") }
                 Toggle(isOn: $settings.wireframe) { Label("와이어프레임", systemImage: "grid") }
                 Toggle(isOn: $settings.texturesEnabled) { Label("텍스처", systemImage: "photo") }
                     .disabled(stats.textureCount == 0)
@@ -98,7 +101,8 @@ struct ModelViewerView: View {
                     }
                     .pickerStyle(.inline)
                     Divider()
-                    Toggle(isOn: $settings.cullingEnabled) { Label("메시렛 컬링", systemImage: "scissors") }
+                    Toggle(isOn: $settings.cullingEnabled) { Label("프러스텀·콘 컬링", systemImage: "scissors") }
+                    Toggle(isOn: $settings.occlusionEnabled) { Label("Hi-Z 오클루전", systemImage: "eye.slash") }
                     Toggle(isOn: $settings.wireframe) { Label("와이어프레임", systemImage: "grid") }
                     Toggle(isOn: $settings.texturesEnabled) { Label("텍스처", systemImage: "photo") }
                         .disabled(stats.textureCount == 0)
@@ -157,6 +161,7 @@ private struct StatsBar: View {
     var body: some View {
         HStack(spacing: 14) {
             item("메시렛", "\(stats.visibleMeshletCount.formatted()) / \(stats.meshletCount.formatted())")
+            if stats.occludedMeshletCount > 0 { item("가림", stats.occludedMeshletCount.formatted()) }
             item("삼각형", stats.triangleCount.formatted())
             item("GPU", String(format: "%.2f ms", stats.gpuTime * 1000))
         }

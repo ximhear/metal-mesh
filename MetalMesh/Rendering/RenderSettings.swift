@@ -20,12 +20,16 @@ struct RenderSettings: Equatable {
     var cullingEnabled = true
     var wireframe = false
     var texturesEnabled = true
+    /// 2패스 Hi-Z 오클루전 컬링
+    var occlusionEnabled = true
 }
 
 /// 렌더러가 프레임마다 채우는 통계. 메인 스레드에서 갱신된다.
 struct RenderStats: Equatable {
     var meshletCount = 0
     var visibleMeshletCount = 0
+    /// Hi-Z 테스트로 제거된 메시렛 수 (오클루전 켜진 경우)
+    var occludedMeshletCount = 0
     var triangleCount = 0
     var vertexCount = 0
     var materialCount = 0

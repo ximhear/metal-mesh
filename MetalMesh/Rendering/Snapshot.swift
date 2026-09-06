@@ -12,7 +12,7 @@ extension Renderer {
         colorDesc.usage = [.renderTarget]
         colorDesc.storageMode = .shared
         let depthDesc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: Self.depthPixelFormat, width: width, height: height, mipmapped: false)
-        depthDesc.usage = .renderTarget
+        depthDesc.usage = [.renderTarget, .shaderRead]
         depthDesc.storageMode = .private
         guard let color = device.makeTexture(descriptor: colorDesc),
               let depth = device.makeTexture(descriptor: depthDesc) else { return nil }

@@ -89,6 +89,9 @@ struct MetalView: PlatformViewRepresentable {
         let view = InteractiveMTKView(frame: .zero, device: renderer.device)
         view.colorPixelFormat = Renderer.colorPixelFormat
         view.depthStencilPixelFormat = Renderer.depthPixelFormat
+        // Hi-Z 오클루전: 깊이를 컴퓨트에서 읽어야 하므로 shaderRead + 비메모리리스
+        view.depthStencilAttachmentTextureUsage = [.renderTarget, .shaderRead]
+        view.depthStencilStorageMode = .private
         view.clearColor = Renderer.clearColor
         view.clearDepth = 1
         view.preferredFramesPerSecond = 60

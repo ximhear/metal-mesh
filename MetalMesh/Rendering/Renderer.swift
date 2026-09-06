@@ -33,9 +33,15 @@ final class Renderer: NSObject, MTKViewDelegate {
     private let commandQueue: MTLCommandQueue
     private let pipeline: MTLRenderPipelineState
     private let depthState: MTLDepthStencilState
+    private let hizCopyPipeline: MTLComputePipelineState
+    private let hizDownsamplePipeline: MTLComputePipelineState
     private let gpuMesh: GPUMesh
     private let uniformBuffers: [MTLBuffer]
     private let statsBuffers: [MTLBuffer]
+    /// 메시렛별 지난 프레임 가시성 (uint). 오클루전 2패스에서 GPU가 읽고 쓴다.
+    private let visibilityBuffer: MTLBuffer
+    private var hizTexture: MTLTexture?
+    private var hizLevelViews: [MTLTexture] = []
     private let inflight = DispatchSemaphore(value: Renderer.maxFramesInFlight)
     private var frameIndex = 0
     private var lastStatsReport = Date.distantPast
@@ -67,6 +73,8 @@ final class Renderer: NSObject, MTKViewDelegate {
         descriptor.colorAttachments[0].pixelFormat = Self.colorPixelFormat
         descriptor.depthAttachmentPixelFormat = Self.depthPixelFormat
         pipeline = try device.makeRenderPipelineState(descriptor: descriptor, options: []).0
+        hizCopyPipeline = try device.makeComputePipelineState(function: try function("hizCopyDepth"))
+        hizDownsamplePipeline = try device.makeComputePipelineState(function: try function("hizDownsample"))
 
         let depthDescriptor = MTLDepthStencilDescriptor()
         depthDescriptor.depthCompareFunction = .less
@@ -82,10 +90,16 @@ final class Renderer: NSObject, MTKViewDelegate {
             return b
         }
         statsBuffers = (0..<Self.maxFramesInFlight).map { i in
-            let b = device.makeBuffer(length: MemoryLayout<UInt32>.stride, options: .storageModeShared)!
+            let b = device.makeBuffer(length: MemoryLayout<UInt32>.stride * Int(STAT_COUNT), options: .storageModeShared)!
             b.label = "stats[\(i)]"
             return b
         }
+        // 첫 프레임에는 모두 보였다고 가정 → 1패스가 전부 그리고 2패스가 비트를 정리한다
+        let ones = [UInt32](repeating: 1, count: gpuMesh.meshletCount)
+        visibilityBuffer = ones.withUnsafeBytes { raw in
+            device.makeBuffer(bytes: raw.baseAddress!, length: raw.count, options: .storageModeShared)!
+        }
+        visibilityBuffer.label = "visibility"
 
         stats.meshletCount = gpuMesh.meshletCount
         stats.triangleCount = gpuMesh.triangleCount
@@ -110,32 +124,91 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     // MARK: - 렌더링
 
-    /// 한 프레임을 인코딩·커밋한다. `waitUntilCompleted`가 true면 완료까지 기다리고 보이는 메시렛 수를 돌려준다.
+    /// 한 프레임을 인코딩·커밋한다. `waitUntilCompleted`가 true면 완료까지 기다리고 그린 메시렛 수를 돌려준다.
+    ///
+    /// 오클루전이 켜져 있고 깊이 텍스처를 읽을 수 있으면 2패스로 그린다:
+    /// 1패스(지난 프레임 가시 메시렛) → Hi-Z 피라미드 생성 → 2패스(나머지를 Hi-Z로 테스트, 가시성 비트 갱신).
     @discardableResult
     func renderFrame(passDescriptor: MTLRenderPassDescriptor, drawable: MTLDrawable?, waitUntilCompleted: Bool) -> Int? {
         inflight.wait()
         let slot = frameIndex % Self.maxFramesInFlight
         frameIndex += 1
 
-        writeUniforms(into: uniformBuffers[slot])
-        let statsPointer = statsBuffers[slot].contents().bindMemory(to: UInt32.self, capacity: 1)
-        statsPointer.pointee = 0
+        let depthTexture = passDescriptor.depthAttachment.texture
+        let canOcclude = settings.occlusionEnabled
+            && depthTexture.map { $0.usage.contains(.shaderRead) && $0.storageMode != .memoryless } == true
+        if canOcclude, let depthTexture { ensureHiZ(width: depthTexture.width, height: depthTexture.height) }
 
-        guard let commandBuffer = commandQueue.makeCommandBuffer(),
-              let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: passDescriptor) else {
+        writeUniforms(into: uniformBuffers[slot], occlusion: canOcclude)
+        let statsPointer = statsBuffers[slot].contents().bindMemory(to: UInt32.self, capacity: Int(STAT_COUNT))
+        for i in 0..<Int(STAT_COUNT) { statsPointer[i] = 0 }
+
+        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
             inflight.signal()
             return nil
         }
         commandBuffer.label = "Frame \(frameIndex)"
-        encoder.label = "Meshlets"
+
+        if canOcclude, let hizTexture {
+            // 1패스: 깊이를 저장해야 Hi-Z를 만들 수 있다
+            let first = passDescriptor.copy() as! MTLRenderPassDescriptor
+            first.depthAttachment.storeAction = .store
+            encodeMeshPass(commandBuffer, descriptor: first, slot: slot, cullPass: UInt32(CULL_PASS_FIRST), label: "Pass 1 (prev visible)")
+            encodeHiZBuild(commandBuffer, depth: depthTexture!, hiz: hizTexture)
+            // 2패스: 이전 결과 위에 이어 그린다
+            let second = passDescriptor.copy() as! MTLRenderPassDescriptor
+            second.colorAttachments[0].loadAction = .load
+            second.depthAttachment.loadAction = .load
+            second.depthAttachment.storeAction = passDescriptor.depthAttachment.storeAction
+            encodeMeshPass(commandBuffer, descriptor: second, slot: slot, cullPass: UInt32(CULL_PASS_SECOND), label: "Pass 2 (Hi-Z tested)")
+        } else {
+            encodeMeshPass(commandBuffer, descriptor: passDescriptor, slot: slot, cullPass: UInt32(CULL_PASS_SINGLE), label: "Meshlets")
+        }
+
+        if let drawable { commandBuffer.present(drawable) }
+
+        let semaphore = inflight
+        commandBuffer.addCompletedHandler { [weak self] buffer in
+            let drawn = Int(statsPointer[Int(STAT_DRAWN)])
+            let occluded = Int(statsPointer[Int(STAT_OCCLUDED)])
+            let gpuTime = buffer.gpuEndTime - buffer.gpuStartTime
+            semaphore.signal()
+            guard !waitUntilCompleted else { return }
+            DispatchQueue.main.async {
+                self?.publishStats(visible: drawn, occluded: occluded, gpuTime: gpuTime)
+            }
+        }
+        commandBuffer.commit()
+
+        guard waitUntilCompleted else { return nil }
+        commandBuffer.waitUntilCompleted()
+        let drawn = Int(statsPointer[Int(STAT_DRAWN)])
+        publishStats(visible: drawn, occluded: Int(statsPointer[Int(STAT_OCCLUDED)]),
+                     gpuTime: commandBuffer.gpuEndTime - commandBuffer.gpuStartTime, force: true)
+        return drawn
+    }
+
+    /// 지난 프레임 가시성 비트를 모두 1로 되돌린다 (카메라 급변 시 한 프레임 팝 방지용, 테스트용)
+    func resetVisibility() {
+        let p = visibilityBuffer.contents().bindMemory(to: UInt32.self, capacity: gpuMesh.meshletCount)
+        for i in 0..<gpuMesh.meshletCount { p[i] = 1 }
+    }
+
+    private func encodeMeshPass(_ commandBuffer: MTLCommandBuffer, descriptor: MTLRenderPassDescriptor, slot: Int, cullPass: UInt32, label: String) {
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else { return }
+        encoder.label = label
         encoder.setRenderPipelineState(pipeline)
         encoder.setDepthStencilState(depthState)
         encoder.setCullMode(.none)   // 와인딩이 뒤집힌 파일도 보이게. 뒷면 제거는 object 스테이지의 콘 컬링이 담당
         encoder.setTriangleFillMode(settings.wireframe ? .lines : .fill)
 
+        var pass = cullPass
         encoder.setObjectBuffer(uniformBuffers[slot], offset: 0, index: Int(BUFFER_UNIFORMS))
         encoder.setObjectBuffer(gpuMesh.meshlets, offset: 0, index: Int(BUFFER_MESHLETS))
         encoder.setObjectBuffer(statsBuffers[slot], offset: 0, index: Int(BUFFER_STATS))
+        encoder.setObjectBytes(&pass, length: MemoryLayout<UInt32>.stride, index: Int(BUFFER_CULL_PASS))
+        encoder.setObjectBuffer(visibilityBuffer, offset: 0, index: Int(BUFFER_VISIBILITY))
+        if let hizTexture { encoder.setObjectTexture(hizTexture, index: Int(TEXTURE_HIZ)) }
 
         encoder.setMeshBuffer(uniformBuffers[slot], offset: 0, index: Int(BUFFER_UNIFORMS))
         encoder.setMeshBuffer(gpuMesh.meshlets, offset: 0, index: Int(BUFFER_MESHLETS))
@@ -145,7 +218,6 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         encoder.setFragmentBuffer(uniformBuffers[slot], offset: 0, index: Int(BUFFER_UNIFORMS))
         encoder.setFragmentBuffer(gpuMesh.materials, offset: 0, index: Int(BUFFER_MATERIALS))
-        // 인자 버퍼로 간접 참조되는 텍스처는 명시적으로 상주시켜야 한다
         encoder.useResources(gpuMesh.textures, usage: .read, stages: .fragment)
 
         let objectThreads = Int(OBJECT_THREADS_PER_THREADGROUP)
@@ -156,30 +228,49 @@ final class Renderer: NSObject, MTKViewDelegate {
             threadsPerMeshThreadgroup: MTLSize(width: Int(MESH_THREADS_PER_THREADGROUP), height: 1, depth: 1)
         )
         encoder.endEncoding()
-
-        if let drawable { commandBuffer.present(drawable) }
-
-        let semaphore = inflight
-        commandBuffer.addCompletedHandler { [weak self] buffer in
-            let visible = Int(statsPointer.pointee)
-            let gpuTime = buffer.gpuEndTime - buffer.gpuStartTime
-            semaphore.signal()
-            guard !waitUntilCompleted else { return }
-            DispatchQueue.main.async {
-                self?.publishStats(visible: visible, gpuTime: gpuTime)
-            }
-        }
-        commandBuffer.commit()
-
-        guard waitUntilCompleted else { return nil }
-        commandBuffer.waitUntilCompleted()
-        let visible = Int(statsPointer.pointee)
-        publishStats(visible: visible, gpuTime: commandBuffer.gpuEndTime - commandBuffer.gpuStartTime, force: true)
-        return visible
     }
 
-    private func publishStats(visible: Int, gpuTime: Double, force: Bool = false) {
+    // MARK: - Hi-Z
+
+    private func ensureHiZ(width: Int, height: Int) {
+        if let t = hizTexture, t.width == width, t.height == height { return }
+        let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r32Float, width: width, height: height, mipmapped: true)
+        desc.usage = [.shaderRead, .shaderWrite]
+        desc.storageMode = .private
+        guard let texture = device.makeTexture(descriptor: desc) else { return }
+        texture.label = "HiZ"
+        hizTexture = texture
+        hizLevelViews = (0..<texture.mipmapLevelCount).compactMap {
+            texture.makeTextureView(pixelFormat: .r32Float, textureType: .type2D, levels: $0..<($0 + 1), slices: 0..<1)
+        }
+    }
+
+    private func encodeHiZBuild(_ commandBuffer: MTLCommandBuffer, depth: MTLTexture, hiz: MTLTexture) {
+        guard let encoder = commandBuffer.makeComputeCommandEncoder(), !hizLevelViews.isEmpty else { return }
+        encoder.label = "HiZ build"
+        func dispatch(_ pipeline: MTLComputePipelineState, width: Int, height: Int) {
+            let tg = MTLSize(width: 8, height: 8, depth: 1)
+            let grid = MTLSize(width: (width + 7) / 8, height: (height + 7) / 8, depth: 1)
+            encoder.dispatchThreadgroups(grid, threadsPerThreadgroup: tg)
+        }
+        encoder.setComputePipelineState(hizCopyPipeline)
+        encoder.setTexture(depth, index: 0)
+        encoder.setTexture(hizLevelViews[0], index: 1)
+        dispatch(hizCopyPipeline, width: hiz.width, height: hiz.height)
+
+        encoder.setComputePipelineState(hizDownsamplePipeline)
+        for level in 1..<hizLevelViews.count {
+            let dst = hizLevelViews[level]
+            encoder.setTexture(hizLevelViews[level - 1], index: 0)
+            encoder.setTexture(dst, index: 1)
+            dispatch(hizDownsamplePipeline, width: dst.width, height: dst.height)
+        }
+        encoder.endEncoding()
+    }
+
+    private func publishStats(visible: Int, occluded: Int, gpuTime: Double, force: Bool = false) {
         stats.visibleMeshletCount = visible
+        stats.occludedMeshletCount = occluded
         stats.gpuTime = gpuTime
         let now = Date()
         if force || now.timeIntervalSince(lastStatsReport) > 0.25 {
@@ -188,7 +279,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
     }
 
-    private func writeUniforms(into buffer: MTLBuffer) {
+    private func writeUniforms(into buffer: MTLBuffer, occlusion: Bool) {
         let view = camera.viewMatrix
         let projection = camera.projectionMatrix
         let viewProjection = projection * view
@@ -202,6 +293,11 @@ final class Renderer: NSObject, MTKViewDelegate {
         u.debugMode = settings.debugMode.rawValue
         u.cullingEnabled = settings.cullingEnabled ? 1 : 0
         u.texturesEnabled = settings.texturesEnabled ? 1 : 0
+        u.occlusionEnabled = occlusion ? 1 : 0
+        if let hizTexture {
+            u.hizSize = SIMD2(UInt32(hizTexture.width), UInt32(hizTexture.height))
+            u.hizMipCount = UInt32(hizTexture.mipmapLevelCount)
+        }
 
         let planes = Math.frustumPlanes(from: viewProjection)
         withUnsafeMutablePointer(to: &u.frustumPlanes) { tuple in
