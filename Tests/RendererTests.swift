@@ -231,3 +231,45 @@ struct RendererTests {
         #expect(simd_dot(SIMD3(near.x, near.y, near.z), behind) + near.w < 0)
     }
 }
+
+@MainActor
+struct OrbitCameraTests {
+    @Test func yawPitchMatchSphericalPosition() {
+        let camera = OrbitCamera()
+        camera.frame(center: .zero, radius: 1)
+        camera.yaw = 0.5
+        camera.pitch = 0.3
+        let expected = SIMD3(cos(0.3) * sin(0.5), sin(0.3), cos(0.3) * cos(0.5)) * camera.distance
+        #expect(simd_distance(camera.position, expected) < 1e-4)
+        #expect(camera.up.y > 0.9, "기본 자세는 수평")
+    }
+
+    @Test func trackballRotationHasNoGimbalLock() {
+        let camera = OrbitCamera()
+        camera.frame(center: .zero, radius: 1)
+        camera.yaw = 0
+        camera.pitch = 0
+        // 세로 드래그를 계속하면 극점을 지나 반대편으로 넘어가야 한다 (각도 제한 없음)
+        for _ in 0..<40 { camera.rotate(deltaYaw: 0, deltaPitch: 0.1) }   // 총 4 rad ≈ 229°
+        let p = simd_normalize(camera.position - camera.target)
+        #expect(p.z < 0, "극점을 넘어 뒤쪽(-z)으로 넘어갔어야 한다: \(p)")
+        #expect(abs(simd_length(camera.position - camera.target) - camera.distance) < 1e-3)
+        // 회전 후에도 뷰 행렬이 유효(직교 기저)
+        let view = camera.viewMatrix
+        let r = SIMD3(view.columns.0.x, view.columns.1.x, view.columns.2.x)
+        let u = SIMD3(view.columns.0.y, view.columns.1.y, view.columns.2.y)
+        #expect(abs(simd_dot(r, u)) < 1e-4)
+    }
+
+    @Test func horizontalDragRotatesAroundUp() {
+        let camera = OrbitCamera()
+        camera.frame(center: .zero, radius: 1)
+        camera.yaw = 0
+        camera.pitch = 0
+        let before = camera.position
+        camera.rotate(deltaYaw: 0.5, deltaPitch: 0)
+        let after = camera.position
+        #expect(abs(after.y - before.y) < 1e-4, "가로 드래그는 높이를 바꾸지 않는다")
+        #expect(after.x > 0, "yaw 증가 → +x 쪽으로")
+    }
+}
